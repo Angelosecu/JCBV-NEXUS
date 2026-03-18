@@ -1,0 +1,16 @@
+{
+    "python.analysis.extraPaths": [
+        "."
+    ],
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingImports": "none",
+        "reportMissingModuleSource": "none",
+        "reportOptionalMemberAccess": "none",
+        "reportGeneralTypeIssues": "none",
+        "reportArgumentType": "none",
+        "reportCallIssue": "none",
+        "reportIndexIssue": "none"
+    },
+    "python.defaultInterpreterPath": "C:\\Users\\JCBV\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\python.exe"
+}

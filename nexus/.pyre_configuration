@@ -1,0 +1,14 @@
+{
+    "site_package_search_strategy": "all",
+    "source_directories": ["."],
+    "search_path": ["."],
+    "strict": false,
+    "taint_models_path": [],
+    "exclude": [
+        "data/.*",
+        "models/.*",
+        "logs/.*",
+        "reports/.*",
+        "__pycache__/.*"
+    ]
+}

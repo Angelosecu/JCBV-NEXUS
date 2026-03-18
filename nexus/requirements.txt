@@ -1,0 +1,47 @@
+# NEXUS Trading System — Dependencies
+# Python 3.13
+
+# Exchange connectivity
+python-binance>=1.0.19
+ccxt>=4.4.56
+websockets>=14.1
+
+# Machine Learning & Deep Learning
+tensorflow>=2.18.0
+stable-baselines3>=2.4.1
+gymnasium>=1.2.3
+scikit-learn>=1.8.0
+
+# LLM / NLP
+langchain>=1.2.12
+langchain-core>=1.2.10
+langchain-groq>=0.3.2
+langchain-google-genai>=2.1.4
+langchain-ollama>=1.0.1
+
+# Data & Analysis
+pandas>=2.2.3
+numpy>=2.2.1
+ta>=0.11.0
+scipy>=1.15.1
+
+# Database
+sqlalchemy>=2.0.36
+
+# Telegram Bot
+python-telegram-bot>=21.9
+
+# HTTP & Async
+requests>=2.32.3
+aiohttp>=3.11.11
+
+# Utilities
+python-dotenv>=1.0.1
+pydantic>=2.10.4
+
+# Backtesting
+backtrader2>=1.9.76.123
+matplotlib>=3.10.0
+
+# Scheduling
+schedule>=1.2.2

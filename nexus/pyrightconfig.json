@@ -1,0 +1,27 @@
+{
+    "include": [
+        "."
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "**/node_modules",
+        "data",
+        "models",
+        "logs",
+        "reports"
+    ],
+    "extraPaths": [
+        "."
+    ],
+    "pythonVersion": "3.13",
+    "pythonPlatform": "Windows",
+    "typeCheckingMode": "off",
+    "reportMissingImports": false,
+    "reportMissingModuleSource": false,
+    "reportOptionalMemberAccess": false,
+    "reportGeneralTypeIssues": false,
+    "reportArgumentType": false,
+    "reportCallIssue": false,
+    "reportIndexIssue": false,
+    "reportOperatorIssue": false
+}
