@@ -1,241 +1,398 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NEXUS - Institutional Quant Dashboard</title>
+    <title>NEXUS - Institutional Command Terminal</title>
     <!-- Fonts -->
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
-        rel="stylesheet">
-    <!-- Lightweight Charts (TradingView) - Versioned for stability -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Lightweight Charts Pinned Version -->
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <link rel="stylesheet" href="/static/style.css">
 </head>
-
 <body>
-
-    <!-- Header / Navbar -->
     <header class="navbar">
         <div class="brand">
             <span class="logo-dot"></span>
-            <h1>NEXUS <span class="subtitle">QUANTITATIVE CORE</span></h1>
+            <h1>NEXUS <span class="subtitle">COMMAND TERMINAL V2</span></h1>
         </div>
         <div class="system-status">
             <div class="status-indicator">
                 <span id="conn-dot" class="dot conn-connecting"></span>
-                <span id="conn-text">Conectando...</span>
+                <span id="conn-text">Connecting...</span>
             </div>
             <div class="status-mode" id="bot-mode">MODE: PAPER</div>
         </div>
     </header>
 
-    <main class="dashboard-grid">
-
-        <!-- Left Panel: Chart & Key Metrics -->
-        <div class="left-panel">
-            <!-- Top Metrics Cards -->
-            <div class="metrics-container">
-                <div class="metric-card shadow-glass">
-                    <div class="metric-title">Portfolio Capital</div>
-                    <div class="metric-value font-mono" id="val-capital">---</div>
+    <div class="app-layout">
+        
+        <!-- MAIN CENTER COLUMN -->
+        <main class="center-col">
+            <!-- Toolbar -->
+            <div class="chart-toolbar shadow-glass">
+                <div class="toolbar-group">
+                    <span class="toolbar-label">Symbol:</span>
+                    <strong id="active-symbol-label" class="highlight-cyan">BTCUSDT</strong>
                 </div>
-                <div class="metric-card shadow-glass">
-                    <div class="metric-title">Open Positions</div>
-                    <div class="metric-value font-mono" id="val-positions">---</div>
+                <div class="separator"></div>
+                <div class="toolbar-group" id="tf-buttons">
+                    <span class="toolbar-label">Timeframe:</span>
+                    <button class="tf-btn" data-tf="1m">1m</button>
+                    <button class="tf-btn" data-tf="5m">5m</button>
+                    <button class="tf-btn" data-tf="15m">15m</button>
+                    <button class="tf-btn" data-tf="1h">1h</button>
+                    <button class="tf-btn" data-tf="2h">2h</button>
+                    <button class="tf-btn" data-tf="4h">4h</button>
+                    <button class="tf-btn" data-tf="1d">1D</button>
                 </div>
-                <div class="metric-card shadow-glass">
-                    <div class="metric-title">Net Exposure</div>
-                    <div class="metric-value font-mono" id="val-exposure">---</div>
-                </div>
-                <div class="metric-card shadow-glass">
-                    <div class="metric-title">Max Drawdown</div>
-                    <div class="metric-value font-mono alert-text" id="val-drawdown">---</div>
+                <div class="separator"></div>
+                <div class="toolbar-group">
+                    <span class="toolbar-label">Overlays:</span>
+                    <label class="toggle-container"><input type="checkbox" id="toggle-ema" checked> EMA 20/50</label>
+                    <label class="toggle-container"><input type="checkbox" id="toggle-bb" checked> Bol. Bands</label>
                 </div>
             </div>
 
-            <!-- TradingView Chart Container -->
-            <div class="chart-wrapper shadow-glass">
-                <div class="chart-header">
-                    <h2>Live Execution Matrix <span class="badge">BTCUSDT</span></h2>
-                </div>
-                <!-- Div for Lightweight Chart -->
+            <!-- TV Chart -->
+            <div class="chart-container shadow-glass">
                 <div id="tvchart" class="tv-chart"></div>
-            </div>
-        </div>
-
-        <!-- Right Panel: Telemetry & Log Stream -->
-        <div class="right-panel shadow-glass">
-            <div class="panel-header">
-                <h2>Arbitro Telemetry <span class="badge badge-purple">LLM Stream</span></h2>
+                <div id="chart-loader" class="loader-overlay">Loading Institutional OHLCV...</div>
             </div>
 
-            <div class="logs-container" id="logs-container">
-                <!-- Logs will be injected here via JS -->
-                <div class="log-entry log-system">
-                    <span class="log-time">00:00:00</span>
-                    <span class="log-msg">Iniciando recepción de telemetría Quant...</span>
+            <!-- Bottom Console (Telemetry) -->
+            <div class="bottom-console shadow-glass">
+                <div class="console-header">
+                    <span>Árbitro Telemetry Terminal</span>
+                    <span class="badge badge-purple">LIVE STREAM</span>
+                </div>
+                <div class="logs-container" id="logs-container">
+                    <div class="log-entry log-system">No logs parsed yet...</div>
                 </div>
             </div>
-        </div>
+        </main>
 
-    </main>
+        <!-- RIGHT SIDEBAR -->
+        <aside class="right-sidebar">
+            
+            <!-- Portfolio Metrics -->
+            <div class="metrics-panel shadow-glass">
+                <h3>Global Portfolio</h3>
+                <div class="metric-row">
+                    <span>Capital</span>
+                    <span id="val-capital" class="val highlight-cyan">---</span>
+                </div>
+                <div class="metric-row">
+                    <span>Exposure</span>
+                    <span id="val-exposure" class="val">---</span>
+                </div>
+                <div class="metric-row">
+                    <span>Drawdown</span>
+                    <span id="val-drawdown" class="val alert-text">---</span>
+                </div>
+                <div class="metric-row">
+                    <span>Open Pos</span>
+                    <span id="val-positions" class="val font-mono">---</span>
+                </div>
+            </div>
+
+            <!-- Asset Selector -->
+            <div class="assets-panel shadow-glass">
+                <h3>Monitored Assets</h3>
+                <ul class="asset-list" id="asset-list">
+                    <li class="asset-item active" data-sym="BTCUSDT">
+                        <div class="asset-name">BTC/USDT</div>
+                        <div class="asset-price" id="price-BTCUSDT">---</div>
+                    </li>
+                    <li class="asset-item" data-sym="ETHUSDT">
+                        <div class="asset-name">ETH/USDT</div>
+                        <div class="asset-price" id="price-ETHUSDT">---</div>
+                    </li>
+                    <li class="asset-item" data-sym="BNBUSDT">
+                        <div class="asset-name">BNB/USDT</div>
+                        <div class="asset-price" id="price-BNBUSDT">---</div>
+                    </li>
+                    <li class="asset-item" data-sym="SOLUSDT">
+                        <div class="asset-name">SOL/USDT</div>
+                        <div class="asset-price" id="price-SOLUSDT">---</div>
+                    </li>
+                    <li class="asset-item" data-sym="XRPUSDT">
+                        <div class="asset-name">XRP/USDT</div>
+                        <div class="asset-price" id="price-XRPUSDT">---</div>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="actions-panel shadow-glass">
+                <h3>Command Controls</h3>
+                <button class="btn btn-panic" onclick="alert('PANIC LIQUIDATE triggered (Simulado)')">🚨 PANIC LIQUIDATE</button>
+                <button class="btn btn-secondary" onclick="alert('System Paused (Simulado)')">⏸ Pause Trading</button>
+            </div>
+        </aside>
+
+    </div>
 
     <script>
         try {
-            // DOM Elements
-            const connDot = document.getElementById('conn-dot');
-            const connText = document.getElementById('conn-text');
-            const modeText = document.getElementById('bot-mode');
-            const valCapital = document.getElementById('val-capital');
-            const valPositions = document.getElementById('val-positions');
-            const valExposure = document.getElementById('val-exposure');
-            const valDrawdown = document.getElementById('val-drawdown');
-            const logsContainer = document.getElementById('logs-container');
-
-            // Set up TradingView Lightweight Chart
-            const chartOptions = {
-                layout: { textColor: '#B2B5BE', background: { type: 'solid', color: 'transparent' } },
-                grid: { vertLines: { color: 'rgba(42, 46, 57, 0.4)' }, horzLines: { color: 'rgba(42, 46, 57, 0.4)' } },
-                timeScale: { timeVisible: true, secondsVisible: false },
-                crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
-            };
-            const chartDiv = document.getElementById('tvchart');
-            const chart = LightweightCharts.createChart(chartDiv, chartOptions);
-
-            new ResizeObserver(entries => {
-                if (entries.length === 0 || entries[0].target !== chartDiv) { return; }
-                const newRect = entries[0].contentRect;
-                chart.applyOptions({ height: newRect.height, width: newRect.width });
-            }).observe(chartDiv);
-
-            const candlestickSeries = chart.addCandlestickSeries({
-                upColor: '#00d4aa', downColor: '#f23645', borderVisible: false, wickUpColor: '#00d4aa', wickDownColor: '#f23645',
-            });
-
-            // Conectar a Binance WSS para datos en vivo
-            async function initLiveChart(symbol = 'BTCUSDT', interval = '1m') {
-                try {
-                    // Fetch velas historicas
-                    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=100`);
-                    const klines = await res.json();
-
-                    const chartData = klines.map(d => ({
-                        time: d[0] / 1000, // Lightweight Charts requires Unix Timestamp in seconds
-                        open: parseFloat(d[1]),
-                        high: parseFloat(d[2]),
-                        low: parseFloat(d[3]),
-                        close: parseFloat(d[4])
-                    }));
-
-                    candlestickSeries.setData(chartData);
-
-                    // Conectar WebSocket para Stream Tick-by-Tick
-                    const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${interval}`);
-                    ws.onmessage = (event) => {
-                        const message = JSON.parse(event.data);
-                        const kline = message.k;
-                        candlestickSeries.update({
-                            time: kline.t / 1000,
-                            open: parseFloat(kline.o),
-                            high: parseFloat(kline.h),
-                            low: parseFloat(kline.l),
-                            close: parseFloat(kline.c)
-                        });
-                    };
-                } catch (err) {
-                    console.error("Error conectando a Binance Live:", err);
-                }
-            }
-            initLiveChart('BTCUSDT', '1m');
-
+            // GLOBALS
+            let activeSymbol = 'BTCUSDT';
+            let activeInterval = '1m';
+            let wsConnection = null;
+            let pollingInterval = null;
+            
+            let candleData = []; // Store raw OHLCV for indicators
             let lastRenderedJson = "";
 
-            async function fetchState() {
+            // DOM
+            const tvchartDiv = document.getElementById('tvchart');
+            const loaderOverlay = document.getElementById('chart-loader');
+            const toggleEma = document.getElementById('toggle-ema');
+            const toggleBb = document.getElementById('toggle-bb');
+            const logsContainer = document.getElementById('logs-container');
+            const activeSymbolLabel = document.getElementById('active-symbol-label');
+
+            // TV Chart Init
+            const chartOptions = { 
+                layout: { textColor: '#B2B5BE', background: { type: 'solid', color: 'transparent' } },
+                grid: { vertLines: { color: 'rgba(42, 46, 57, 0.08)' }, horzLines: { color: 'rgba(42, 46, 57, 0.08)' } },
+                timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 12 },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+            };
+            const chart = LightweightCharts.createChart(tvchartDiv, chartOptions);
+            
+            new ResizeObserver(entries => {
+                if (entries.length === 0 || entries[0].target !== tvchartDiv) return;
+                chart.applyOptions({ width: entries[0].contentRect.width, height: entries[0].contentRect.height });
+            }).observe(tvchartDiv);
+
+            // Series Initialization
+            const mainSeries = chart.addCandlestickSeries({
+                upColor: '#00d4aa', downColor: '#f23645', borderVisible: false, wickUpColor: '#00d4aa', wickDownColor: '#f23645',
+            });
+            const ema20Series = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1, crosshairMarkerVisible: false });
+            const ema50Series = chart.addLineSeries({ color: '#8b5cf6', lineWidth: 2, crosshairMarkerVisible: false });
+            const bbUpperSeries = chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
+            const bbLowerSeries = chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
+
+            // Math Algorithms for Indicators
+            function calcEMA(data, period) {
+                if(data.length===0) return [];
+                const k = 2 / (period + 1);
+                let ema = data[0].close;
+                return data.map(d => {
+                    ema = (d.close - ema) * k + ema;
+                    return { time: d.time, value: ema };
+                });
+            }
+
+            function calcBollinger(data, period=20, mult=2) {
+                const upper=[], lower=[];
+                for(let i=0; i<data.length; i++) {
+                    if(i < period - 1) continue;
+                    const slice = data.slice(i - period + 1, i + 1);
+                    const sma = slice.reduce((acc, v) => acc + v.close, 0) / period;
+                    const variance = slice.reduce((acc, v) => acc + Math.pow(v.close - sma, 2), 0) / period;
+                    const stdDev = Math.sqrt(variance);
+                    upper.push({ time: data[i].time, value: sma + mult * stdDev });
+                    lower.push({ time: data[i].time, value: sma - mult * stdDev });
+                }
+                return { upper, lower };
+            }
+
+            function updateIndicators() {
+                if (!toggleEma.checked) {
+                    ema20Series.setData([]); ema50Series.setData([]);
+                } else {
+                    ema20Series.setData(calcEMA(candleData, 20));
+                    ema50Series.setData(calcEMA(candleData, 50));
+                }
+                if (!toggleBb.checked) {
+                    bbUpperSeries.setData([]); bbLowerSeries.setData([]);
+                } else {
+                    const bb = calcBollinger(candleData, 20, 2);
+                    bbUpperSeries.setData(bb.upper); bbLowerSeries.setData(bb.lower);
+                }
+            }
+
+            toggleEma.addEventListener('change', updateIndicators);
+            toggleBb.addEventListener('change', updateIndicators);
+
+            // Fetch and Bootstrap Chart
+            async function bootstrapChart(symbol, interval) {
+                loaderOverlay.style.display = 'flex';
+                if(wsConnection) { wsConnection.close(); }
+                
+                try {
+                    // Fetch 1000 candles for deep history
+                    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=1000`);
+                    const klines = await res.json();
+                    
+                    candleData = klines.map(d => ({
+                        time: d[0] / 1000, open: parseFloat(d[1]), high: parseFloat(d[2]),
+                        low: parseFloat(d[3]), close: parseFloat(d[4])
+                    }));
+                    
+                    mainSeries.setData(candleData);
+                    updateIndicators();
+                    
+                    // Native execution markers will be applied later in API poll loop
+                    
+                    loaderOverlay.style.display = 'none';
+
+                    // Connect Binance WSS tick stream
+                    const binanceIntervalMap = { '1d': '1d' }; // Some intervals map exactly
+                    const targetInterval = binanceIntervalMap[interval] || interval;
+                    wsConnection = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${targetInterval}`);
+                    wsConnection.onmessage = (event) => {
+                        const msg = JSON.parse(event.data);
+                        const k = msg.k;
+                        const candle = {
+                            time: k.t / 1000,
+                            open: parseFloat(k.o),
+                            high: parseFloat(k.h),
+                            low: parseFloat(k.l),
+                            close: parseFloat(k.c)
+                        };
+                        mainSeries.update(candle);
+                        
+                        // Update last price in Side bar
+                        const pEl = document.getElementById('price-' + symbol);
+                        if(pEl) {
+                            pEl.innerText = candle.close.toFixed(2);
+                            pEl.className = candle.close >= candle.open ? 'asset-price price-up' : 'asset-price price-down';
+                        }
+                        
+                        // Overwrite last element in array for indicators recalculation
+                        if (candleData.length > 0 && candleData[candleData.length-1].time === candle.time) {
+                            candleData[candleData.length-1] = candle;
+                        } else {
+                            candleData.push(candle);
+                        }
+                        updateIndicators();
+                    };
+
+                } catch(e) {
+                    console.error("Error Bootstrapping Chart:", e);
+                    loaderOverlay.innerText = "Error Loading Exchange Data";
+                }
+            }
+
+            // UI Actions
+            document.querySelectorAll('.asset-item').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    document.querySelectorAll('.asset-item').forEach(v => v.classList.remove('active'));
+                    el.classList.add('active');
+                    activeSymbol = el.getAttribute('data-sym');
+                    activeSymbolLabel.innerText = activeSymbol;
+                    bootstrapChart(activeSymbol, activeInterval);
+                    fetchState(true); // Force telemetry update for new symbol
+                });
+            });
+
+            document.querySelectorAll('.tf-btn').forEach(btn => {
+                // Initialize default state
+                if(btn.getAttribute('data-tf') === '1m') btn.classList.add('active');
+
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tf-btn').forEach(v => v.classList.remove('active'));
+                    btn.classList.add('active');
+                    activeInterval = btn.getAttribute('data-tf');
+                    bootstrapChart(activeSymbol, activeInterval);
+                });
+            });
+
+            // FASTAPI Backend Polling (Telemetry & Signals)
+            async function fetchState(forceRender = false) {
                 try {
                     const statusRes = await fetch('/api/v1/status');
-                    if (statusRes.ok) {
+                    if(statusRes.ok) {
                         const data = await statusRes.json();
-                        connDot.className = 'dot conn-online';
-                        connText.innerText = 'ONLINE';
-                        modeText.innerText = 'MODE: ' + data.mode;
-                        valCapital.innerText = '$' + data.capital.toLocaleString('en-US', { minimumFractionDigits: 2 });
-                        valPositions.innerText = data.open_positions;
-                        valExposure.innerText = data.exposure_pct.toFixed(2) + '%';
-                        valDrawdown.innerText = data.drawdown_pct.toFixed(2) + '%';
-                    } else {
-                        throw new Error("Status Fetch Error");
+                        document.getElementById('conn-dot').className = 'dot conn-online';
+                        document.getElementById('conn-text').innerText = 'NEXUS ONLINE';
+                        document.getElementById('bot-mode').innerText = 'MODE: ' + data.mode;
+                        document.getElementById('val-capital').innerText = '$' + data.capital.toLocaleString();
+                        document.getElementById('val-positions').innerText = data.open_positions;
+                        document.getElementById('val-exposure').innerText = data.exposure_pct.toFixed(2) + '%';
+                        document.getElementById('val-drawdown').innerText = data.drawdown_pct.toFixed(2) + '%';
                     }
 
-                    const logsRes = await fetch('/api/v1/logs?limit=30');
-                    if (logsRes.ok) {
+                    const logsRes = await fetch('/api/v1/logs?limit=100');
+                    if(logsRes.ok) {
                         const logs = await logsRes.json();
-                        const currentJson = JSON.stringify(logs);
-                        if (currentJson !== lastRenderedJson) {
-                            renderLogs(logs);
-                            lastRenderedJson = currentJson;
+                        // Filter logs for the active symbol
+                        const sysLogs = logs.filter(l => !l.symbol || l.symbol === activeSymbol);
+                        const cJson = JSON.stringify(sysLogs);
+                        
+                        if(cJson !== lastRenderedJson || forceRender) {
+                            renderLogs(sysLogs);
+                            overlayMarkers(sysLogs);
+                            lastRenderedJson = cJson;
                         }
                     }
-                } catch (err) {
-                    console.error("API error", err);
-                    connDot.className = 'dot conn-offline';
-                    connText.innerText = 'OFFLINE';
+                } catch(e) {
+                    document.getElementById('conn-dot').className = 'dot conn-offline';
+                    document.getElementById('conn-text').innerText = 'OFFLINE';
                 }
             }
 
             function renderLogs(logsArray) {
                 let html = '';
                 logsArray.forEach(log => {
-                    const dateObj = new Date(log.timestamp);
-                    const timeStr = isNaN(dateObj) ? log.timestamp : dateObj.toLocaleTimeString('en-US', { hour12: false });
-
-                    if (log.type === 'agent_decision') {
-                        const decClass = log.decision === 'HOLD' ? 'log-hold' : (log.decision === 'BUY' ? 'log-buy' : 'log-sell');
-                        const reason = log.reasoning || "Desconocido";
-                        const confStr = typeof log.confidence === 'number' ? (log.confidence * 100).toFixed(0) + '%' : 'N/A';
-                        const provStr = (log.metadata && log.metadata.provider) ? log.metadata.provider : 'N/A';
-
+                    const t = new Date(log.timestamp);
+                    const ts = isNaN(t) ? log.timestamp : t.toLocaleTimeString('en-US',{hour12:false});
+                    if(log.type === 'agent_decision') {
+                        const dc = log.decision === 'HOLD' ? 'log-hold' : (log.decision === 'BUY'?'log-buy':'log-sell');
                         html += `
                             <div class="log-entry">
-                                <span class="log-time font-mono">${timeStr}</span>
-                                <span class="log-badge ${decClass}">${log.decision}</span>
-                                <span class="log-agent">[${log.agent}]</span>
-                                <span class="log-msg">${reason}</span>
-                                <div class="log-meta font-mono">Conf: ${confStr} | Provider: ${provStr}</div>
+                                <span class="log-time">[${ts}]</span>
+                                <span class="log-badge ${dc}">${log.decision}</span>
+                                <span class="log-agent">${log.agent}:</span>
+                                <span class="log-msg text-wrap">${log.reasoning || ''}</span>
+                                <div class="log-meta">Conf: ${log.confidence} | SRC: ${log.metadata?.provider || 'N/A'}</div>
                             </div>
                         `;
-                    } else if (log.type === 'trade_execution') {
-                        const actClass = log.action === 'BUY' ? 'log-buy' : 'log-sell';
+                    } else if(log.type === 'trade_execution') {
+                        const ac = log.action === 'BUY' ? 'log-buy' : 'log-sell';
                         html += `
                             <div class="log-entry execution-flash">
-                                <span class="log-time font-mono">${timeStr}</span>
-                                <span class="log-badge ${actClass}">EXEC ${log.action}</span>
-                                <span class="log-msg highlight">Size: ${log.size} ${log.symbol} @ $${log.price}</span>
-                            </div>
-                        `;
-                    } else {
-                        html += `
-                            <div class="log-entry log-system">
-                                <span class="log-time font-mono">${timeStr}</span>
-                                <span class="log-msg">${log.message || JSON.stringify(log)}</span>
+                                <span class="log-time">[${ts}]</span>
+                                <span class="log-badge ${ac}">EXEC ${log.action}</span>
+                                <span class="log-msg highlight">Size: ${log.size} @ $${log.price}</span>
                             </div>
                         `;
                     }
                 });
-
-                logsContainer.innerHTML = html;
+                logsContainer.innerHTML = html || '<div class="log-entry">No logs for this symbol.</div>';
                 logsContainer.scrollTop = logsContainer.scrollHeight;
             }
 
-            setInterval(fetchState, 2000);
-            fetchState();
+            function overlayMarkers(logsArray) {
+                const markers = [];
+                // Solo consideramos ejecuciones en vivo/papel como marcas oficiales en la grafica
+                logsArray.forEach(log => {
+                    if(log.type === 'trade_execution' && log.symbol === activeSymbol) {
+                        const ts = Math.floor(new Date(log.timestamp).getTime() / 1000);
+                        if(log.action === 'BUY') {
+                            markers.push({ time: ts, position: 'belowBar', color: '#00d4aa', shape: 'arrowUp', text: 'BUY' });
+                        } else if(log.action === 'SELL') {
+                            markers.push({ time: ts, position: 'aboveBar', color: '#f23645', shape: 'arrowDown', text: 'SELL' });
+                        }
+                    }
+                });
+                // Sort by time required by setMarkers
+                markers.sort((a,b) => a.time - b.time);
+                mainSeries.setMarkers(markers);
+            }
 
-        } catch (globalErr) {
-            console.error("Global Script Error: ", globalErr);
-            document.body.innerHTML += `<div style="position:absolute; top:10px; left:10px; color:red; z-index:9999; background:black; padding:10px; border: 1px solid red;">CRITICAL JS ERROR: ${globalErr.message}</div>`;
+            // Init App
+            bootstrapChart(activeSymbol, activeInterval);
+            fetchState();
+            pollingInterval = setInterval(fetchState, 2000);
+
+        } catch (err) {
+            console.error(err);
         }
     </script>
 </body>
-
 </html>
