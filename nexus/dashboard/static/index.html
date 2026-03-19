@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS - Institutional Quant Dashboard</title>
+    <!-- Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <!-- Lightweight Charts (TradingView) - Versioned for stability -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+    <!-- Header / Navbar -->
+    <header class="navbar">
+        <div class="brand">
+            <span class="logo-dot"></span>
+            <h1>NEXUS <span class="subtitle">QUANTITATIVE CORE</span></h1>
+        </div>
+        <div class="system-status">
+            <div class="status-indicator">
+                <span id="conn-dot" class="dot conn-connecting"></span>
+                <span id="conn-text">Conectando...</span>
+            </div>
+            <div class="status-mode" id="bot-mode">MODE: PAPER</div>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+
+        <!-- Left Panel: Chart & Key Metrics -->
+        <div class="left-panel">
+            <!-- Top Metrics Cards -->
+            <div class="metrics-container">
+                <div class="metric-card shadow-glass">
+                    <div class="metric-title">Portfolio Capital</div>
+                    <div class="metric-value font-mono" id="val-capital">---</div>
+                </div>
+                <div class="metric-card shadow-glass">
+                    <div class="metric-title">Open Positions</div>
+                    <div class="metric-value font-mono" id="val-positions">---</div>
+                </div>
+                <div class="metric-card shadow-glass">
+                    <div class="metric-title">Net Exposure</div>
+                    <div class="metric-value font-mono" id="val-exposure">---</div>
+                </div>
+                <div class="metric-card shadow-glass">
+                    <div class="metric-title">Max Drawdown</div>
+                    <div class="metric-value font-mono alert-text" id="val-drawdown">---</div>
+                </div>
+            </div>
+
+            <!-- TradingView Chart Container -->
+            <div class="chart-wrapper shadow-glass">
+                <div class="chart-header">
+                    <h2>Live Execution Matrix <span class="badge">BTCUSDT</span></h2>
+                </div>
+                <!-- Div for Lightweight Chart -->
+                <div id="tvchart" class="tv-chart"></div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Telemetry & Log Stream -->
+        <div class="right-panel shadow-glass">
+            <div class="panel-header">
+                <h2>Arbitro Telemetry <span class="badge badge-purple">LLM Stream</span></h2>
+            </div>
+
+            <div class="logs-container" id="logs-container">
+                <!-- Logs will be injected here via JS -->
+                <div class="log-entry log-system">
+                    <span class="log-time">00:00:00</span>
+                    <span class="log-msg">Iniciando recepción de telemetría Quant...</span>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        try {
+            // DOM Elements
+            const connDot = document.getElementById('conn-dot');
+            const connText = document.getElementById('conn-text');
+            const modeText = document.getElementById('bot-mode');
+            const valCapital = document.getElementById('val-capital');
+            const valPositions = document.getElementById('val-positions');
+            const valExposure = document.getElementById('val-exposure');
+            const valDrawdown = document.getElementById('val-drawdown');
+            const logsContainer = document.getElementById('logs-container');
+
+            // Set up TradingView Lightweight Chart
+            const chartOptions = {
+                layout: { textColor: '#B2B5BE', background: { type: 'solid', color: 'transparent' } },
+                grid: { vertLines: { color: 'rgba(42, 46, 57, 0.4)' }, horzLines: { color: 'rgba(42, 46, 57, 0.4)' } },
+                timeScale: { timeVisible: true, secondsVisible: false },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+            };
+            const chartDiv = document.getElementById('tvchart');
+            const chart = LightweightCharts.createChart(chartDiv, chartOptions);
+
+            new ResizeObserver(entries => {
+                if (entries.length === 0 || entries[0].target !== chartDiv) { return; }
+                const newRect = entries[0].contentRect;
+                chart.applyOptions({ height: newRect.height, width: newRect.width });
+            }).observe(chartDiv);
+
+            const candlestickSeries = chart.addCandlestickSeries({
+                upColor: '#00d4aa', downColor: '#f23645', borderVisible: false, wickUpColor: '#00d4aa', wickDownColor: '#f23645',
+            });
+
+            // Conectar a Binance WSS para datos en vivo
+            async function initLiveChart(symbol = 'BTCUSDT', interval = '1m') {
+                try {
+                    // Fetch velas historicas
+                    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=100`);
+                    const klines = await res.json();
+
+                    const chartData = klines.map(d => ({
+                        time: d[0] / 1000, // Lightweight Charts requires Unix Timestamp in seconds
+                        open: parseFloat(d[1]),
+                        high: parseFloat(d[2]),
+                        low: parseFloat(d[3]),
+                        close: parseFloat(d[4])
+                    }));
+
+                    candlestickSeries.setData(chartData);
+
+                    // Conectar WebSocket para Stream Tick-by-Tick
+                    const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${interval}`);
+                    ws.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        const kline = message.k;
+                        candlestickSeries.update({
+                            time: kline.t / 1000,
+                            open: parseFloat(kline.o),
+                            high: parseFloat(kline.h),
+                            low: parseFloat(kline.l),
+                            close: parseFloat(kline.c)
+                        });
+                    };
+                } catch (err) {
+                    console.error("Error conectando a Binance Live:", err);
+                }
+            }
+            initLiveChart('BTCUSDT', '1m');
+
+            let lastRenderedJson = "";
+
+            async function fetchState() {
+                try {
+                    const statusRes = await fetch('/api/v1/status');
+                    if (statusRes.ok) {
+                        const data = await statusRes.json();
+                        connDot.className = 'dot conn-online';
+                        connText.innerText = 'ONLINE';
+                        modeText.innerText = 'MODE: ' + data.mode;
+                        valCapital.innerText = '$' + data.capital.toLocaleString('en-US', { minimumFractionDigits: 2 });
+                        valPositions.innerText = data.open_positions;
+                        valExposure.innerText = data.exposure_pct.toFixed(2) + '%';
+                        valDrawdown.innerText = data.drawdown_pct.toFixed(2) + '%';
+                    } else {
+                        throw new Error("Status Fetch Error");
+                    }
+
+                    const logsRes = await fetch('/api/v1/logs?limit=30');
+                    if (logsRes.ok) {
+                        const logs = await logsRes.json();
+                        const currentJson = JSON.stringify(logs);
+                        if (currentJson !== lastRenderedJson) {
+                            renderLogs(logs);
+                            lastRenderedJson = currentJson;
+                        }
+                    }
+                } catch (err) {
+                    console.error("API error", err);
+                    connDot.className = 'dot conn-offline';
+                    connText.innerText = 'OFFLINE';
+                }
+            }
+
+            function renderLogs(logsArray) {
+                let html = '';
+                logsArray.forEach(log => {
+                    const dateObj = new Date(log.timestamp);
+                    const timeStr = isNaN(dateObj) ? log.timestamp : dateObj.toLocaleTimeString('en-US', { hour12: false });
+
+                    if (log.type === 'agent_decision') {
+                        const decClass = log.decision === 'HOLD' ? 'log-hold' : (log.decision === 'BUY' ? 'log-buy' : 'log-sell');
+                        const reason = log.reasoning || "Desconocido";
+                        const confStr = typeof log.confidence === 'number' ? (log.confidence * 100).toFixed(0) + '%' : 'N/A';
+                        const provStr = (log.metadata && log.metadata.provider) ? log.metadata.provider : 'N/A';
+
+                        html += `
+                            <div class="log-entry">
+                                <span class="log-time font-mono">${timeStr}</span>
+                                <span class="log-badge ${decClass}">${log.decision}</span>
+                                <span class="log-agent">[${log.agent}]</span>
+                                <span class="log-msg">${reason}</span>
+                                <div class="log-meta font-mono">Conf: ${confStr} | Provider: ${provStr}</div>
+                            </div>
+                        `;
+                    } else if (log.type === 'trade_execution') {
+                        const actClass = log.action === 'BUY' ? 'log-buy' : 'log-sell';
+                        html += `
+                            <div class="log-entry execution-flash">
+                                <span class="log-time font-mono">${timeStr}</span>
+                                <span class="log-badge ${actClass}">EXEC ${log.action}</span>
+                                <span class="log-msg highlight">Size: ${log.size} ${log.symbol} @ $${log.price}</span>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="log-entry log-system">
+                                <span class="log-time font-mono">${timeStr}</span>
+                                <span class="log-msg">${log.message || JSON.stringify(log)}</span>
+                            </div>
+                        `;
+                    }
+                });
+
+                logsContainer.innerHTML = html;
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+
+            setInterval(fetchState, 2000);
+            fetchState();
+
+        } catch (globalErr) {
+            console.error("Global Script Error: ", globalErr);
+            document.body.innerHTML += `<div style="position:absolute; top:10px; left:10px; color:red; z-index:9999; background:black; padding:10px; border: 1px solid red;">CRITICAL JS ERROR: ${globalErr.message}</div>`;
+        }
+    </script>
+</body>
+
+</html>

@@ -14,6 +14,7 @@ import sys
 import asyncio
 import math
 import logging
+import importlib
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -24,8 +25,8 @@ logging.basicConfig(level=logging.WARNING)
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
-import numpy as np
-import pandas as pd
+import numpy as np  # type: ignore
+import pandas as pd  # type: ignore
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -133,7 +134,7 @@ def test_imports(t: TestRunner):
     
     for mod_name, cls_name in modules:
         try:
-            mod = __import__(mod_name, fromlist=[cls_name])
+            mod = importlib.import_module(mod_name)
             obj = getattr(mod, cls_name)
             t.check(f"import {mod_name}.{cls_name}", obj is not None)
         except Exception as exc:
@@ -145,7 +146,7 @@ def test_imports(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_signal_engine(t: TestRunner):
-    from core.signal_engine import TechnicalSignalEngine, SignalDirection
+    from core.signal_engine import TechnicalSignalEngine, SignalDirection  # type: ignore
     
     t.section("2. TECHNICAL SIGNAL ENGINE")
     
@@ -185,7 +186,7 @@ def test_signal_engine(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_risk_manager(t: TestRunner):
-    from core.risk_manager import QuantRiskManager
+    from core.risk_manager import QuantRiskManager  # type: ignore
     
     t.section("3. QUANT RISK MANAGER")
     
@@ -223,17 +224,22 @@ def test_risk_manager(t: TestRunner):
     t.check("CB 18% >= 15% → True", cb_on is True)
     t.check("CB active after trigger", rm_cb.is_circuit_breaker_active() is True)
     
-    # Correlation Check
+    # ATR Sizing
+    atr1 = rm.atr_position_size(10000.0, 100.0, 2000.0, 0.01, 2.0)
+    t.check("ATR Sizing normal -> 10.0%", atr1 == 10.0)
+
+    # Correlation Penalty
     try:
-        from scipy import stats
-        pos_identical = [
-            {"symbol": "BTC", "returns": [0.01, 0.02, -0.01, 0.015, -0.005]},
-            {"symbol": "BTC2", "returns": [0.01, 0.02, -0.01, 0.015, -0.005]},
-        ]
-        cc = rm.correlation_check(pos_identical, threshold=0.85)
-        t.check("Identical correlation → False (block)", cc is False)
+        from scipy import stats  # type: ignore
+        pos_identical = [{"symbol": "BTC"}]
+        ret_data = {
+            "BTC": [0.01, 0.02, -0.01, 0.015, -0.005],
+            "ETH": [0.01, 0.02, -0.01, 0.015, -0.005],
+        }
+        cp = rm.correlation_penalty("ETH", pos_identical, ret_data, threshold=0.70)
+        t.check("Identical correlation -> Penalty 0.0", cp == 0.0)
     except ImportError:
-        t.skip("Correlation check", "scipy not installed")
+        t.skip("Correlation penalty", "scipy not installed")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -241,10 +247,10 @@ def test_risk_manager(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_agents(t: TestRunner):
-    from agents.agent_bull import AgentBull
-    from agents.agent_bear import AgentBear
-    from agents.agent_arbitro import AgentArbitro
-    from core.signal_engine import TechnicalSignalEngine
+    from agents.agent_bull import AgentBull  # type: ignore
+    from agents.agent_bear import AgentBear  # type: ignore
+    from agents.agent_arbitro import AgentArbitro  # type: ignore
+    from core.signal_engine import TechnicalSignalEngine  # type: ignore
     
     t.section("4. AGENTS (BULL, BEAR, ARBITRO)")
     
@@ -291,7 +297,7 @@ def test_agents(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_execution_engine(t: TestRunner):
-    from core.execution_engine import (
+    from core.execution_engine import (  # type: ignore
         ExecutionEngine, OrderRequest, OrderSide, OrderType, OrderStatus,
         TWAPConfig, BinanceConnector,
     )
@@ -328,7 +334,7 @@ def test_execution_engine(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_ml_engine(t: TestRunner):
-    from core.ml_engine import MLEngine
+    from core.ml_engine import MLEngine  # type: ignore
     
     t.section("6. ML ENGINE")
     
@@ -359,7 +365,7 @@ def test_ml_engine(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_sentiment_engine(t: TestRunner):
-    from core.sentiment_engine import SentimentEngine
+    from core.sentiment_engine import SentimentEngine  # type: ignore
     
     t.section("7. SENTIMENT ENGINE")
     
@@ -387,7 +393,7 @@ def test_sentiment_engine(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_evolutionary_agent(t: TestRunner):
-    from core.evolutionary_agent import EvolutionaryAgent
+    from core.evolutionary_agent import EvolutionaryAgent  # type: ignore
     
     t.section("8. EVOLUTIONARY AGENT")
     
@@ -408,7 +414,7 @@ def test_evolutionary_agent(t: TestRunner):
     t.check("Sharpe(flat equity) = 0", sharpe_flat == 0.0)
     
     # Conservative mode
-    from core.risk_manager import QuantRiskManager
+    from core.risk_manager import QuantRiskManager  # type: ignore
     rm = QuantRiskManager(log_dir=str(_ROOT / "logs"))
     agent._risk_manager = rm
     
@@ -438,7 +444,7 @@ def test_evolutionary_agent(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_telegram_reporter(t: TestRunner):
-    from reporting.weekly_report import NexusTelegramReporter
+    from reporting.weekly_report import NexusTelegramReporter  # type: ignore
     
     t.section("9. TELEGRAM REPORTER (OFFLINE)")
     
@@ -460,7 +466,7 @@ def test_telegram_reporter(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_paper_trader(t: TestRunner):
-    from main import PaperTrader
+    from main import PaperTrader  # type: ignore
     
     t.section("10. PAPER TRADER")
     
@@ -499,7 +505,7 @@ def test_paper_trader(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_configuration(t: TestRunner):
-    from config.settings import (
+    from config.settings import (  # type: ignore
         trading_config, risk_config, ml_config, sentiment_config, backtest_config,
     )
     
@@ -518,12 +524,12 @@ def test_configuration(t: TestRunner):
 # ══════════════════════════════════════════════════════════════════════
 
 def test_integration(t: TestRunner):
-    from core.signal_engine import TechnicalSignalEngine
-    from core.risk_manager import QuantRiskManager
-    from agents.agent_bull import AgentBull
-    from agents.agent_bear import AgentBear
-    from agents.agent_arbitro import AgentArbitro
-    from main import PaperTrader
+    from core.signal_engine import TechnicalSignalEngine  # type: ignore
+    from core.risk_manager import QuantRiskManager  # type: ignore
+    from agents.agent_bull import AgentBull  # type: ignore
+    from agents.agent_bear import AgentBear  # type: ignore
+    from agents.agent_arbitro import AgentArbitro  # type: ignore
+    from main import PaperTrader  # type: ignore
     
     t.section("12. CROSS-MODULE INTEGRATION")
     
@@ -588,7 +594,7 @@ def test_integration(t: TestRunner):
 
 def main():
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore
     
     print("\n" + "═" * 60)
     print("  NEXUS TRADING SYSTEM — FULL PROJECT AUDIT")

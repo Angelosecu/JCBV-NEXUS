@@ -55,6 +55,7 @@ from core.sentiment_engine import SentimentEngine  # type: ignore
 from core.risk_manager import QuantRiskManager  # type: ignore
 from core.execution_engine import ExecutionEngine, OrderRequest, OrderSide, OrderType  # type: ignore
 from core.evolutionary_agent import EvolutionaryAgent  # type: ignore
+from core.structured_logger import get_quant_logger # type: ignore
 
 # ── Agents ──────────────────────────────────────
 from agents.agent_bull import AgentBull  # type: ignore
@@ -506,12 +507,26 @@ class NexusSystem:
         if action == "HOLD" or confidence < self.MIN_CONFIDENCE:
             return
 
+        # ── Calcular ATR para sizing y SL/TP ──────────────────────
+        atr = self._estimate_atr(df)
+
         # 6a. Kelly Criterion → tamaño de posición
         win_rate = 0.55  # Estimación base, se actualiza con historial
         avg_win = 1.5
         avg_loss = 1.0
         kelly_size = self.risk_manager.kelly_criterion(win_rate, avg_win, avg_loss)
         position_pct = kelly_size * 100  # Como porcentaje
+
+        # 6b. ATR-Based Sizing (Volatility-Scaled)
+        capital = await self._get_current_capital()
+        atr_pct = self.risk_manager.atr_position_size(
+            capital=capital,
+            atr=atr,
+            current_price=current_price,
+        )
+        
+        # Combinar Kelly con ATR Sizing (usar el más conservador)
+        position_pct = min(position_pct, atr_pct)
 
         # Usar position_size del árbitro si disponible
         arb_pct = decision.get("position_size_pct", 0)
@@ -521,7 +536,7 @@ class NexusSystem:
         if position_pct <= 0:
             return
 
-        # 6b. Circuit Breaker check
+        # 6c. Circuit Breaker check
         current_dd = self._get_current_drawdown()
         if self.risk_manager.circuit_breaker_check(current_dd):
             logger.warning("CIRCUIT BREAKER: Orden bloqueada para %s", symbol)
@@ -530,20 +545,42 @@ class NexusSystem:
             await self.telegram.alerta_circuit_breaker(current_dd)
             return
 
-        # 6c. Correlation check
+        # 6d. Correlation Penalty check (Nivel Portafolio)
         open_positions = self._get_open_positions_for_corr()
-        if not self.risk_manager.correlation_check(open_positions):
-            logger.warning("CORRELACION: Orden bloqueada para %s", symbol)
-            return
+        
+        # Recolectar retornos recientes de todos los símbolos operables
+        returns_data = {}
+        for sym in trading_config.symbols:
+            hist_df = self.data_handler.get_dataframe(sym)
+            if hist_df is not None and not hist_df.empty:
+                closes = hist_df["close"].values[-31:]  # Últimas 30 velas
+                if len(closes) > 1:
+                    rets = np.diff(closes) / closes[:-1]
+                    returns_data[sym] = rets.tolist()
 
-        # 6d. Max positions check
+        penalty = self.risk_manager.correlation_penalty(
+            new_symbol=symbol,
+            existing_positions=open_positions,
+            returns_data=returns_data,
+        )
+
+        if penalty == 0.0:
+            logger.warning("CORRELACION: Orden bloqueada para %s (Penalty 100%%)", symbol)
+            return
+            
+        # Aplicar el factor de penalización al tamaño de posición
+        original_pct = position_pct
+        position_pct *= penalty
+        if penalty < 1.0:
+            logger.info("Sizing reducido por correlación: %.1f%% → %.1f%%", original_pct, position_pct)
+
+        # 6e. Max positions check
         n_open = await self._get_open_position_count()
         if n_open >= self.MAX_OPEN_POSITIONS:
             logger.info("Max posiciones (%d) alcanzadas", self.MAX_OPEN_POSITIONS)
             return
 
         # ── Calcular SL/TP con ATR ────────────────────────────────
-        atr = self._estimate_atr(df)
         side = "BUY" if action == "BUY" else "SELL"
 
         if side == "BUY":
@@ -554,7 +591,6 @@ class NexusSystem:
             take_profit = current_price - (3.0 * atr)
 
         # ── Calcular quantity ─────────────────────────────────────
-        capital = await self._get_current_capital()
         quantity = (capital * position_pct / 100) / current_price
         quantity = float(f"{quantity:.6f}")
 
@@ -590,6 +626,15 @@ class NexusSystem:
             self.telegram.track_equity(self.paper_trader.capital)
             self.telegram.track_trade(trade_data)
 
+            # Phase 6: JSONL Export
+            try:
+                qlogger = get_quant_logger()
+                qlogger.log_trade_execution(
+                    symbol=symbol, action=side, size=quantity, price=current_price, trade_id="paper"
+                )
+            except Exception as e:
+                logger.error("Error exportando telemetria trade PAPER: %s", e)
+
         elif self.mode == TradingMode.LIVE:
             # ── Ejecución Real ────────────────────────
             try:
@@ -606,6 +651,15 @@ class NexusSystem:
                 logger.info("LIVE ORDER: %s", result)
 
                 self.telegram.track_trade(trade_data)
+                
+                # Phase 6: JSONL Export
+                try:
+                    qlogger = get_quant_logger()
+                    qlogger.log_trade_execution(
+                        symbol=symbol, action=side, size=quantity, price=current_price, trade_id="live"
+                    )
+                except Exception as e:
+                    logger.error("Error exportando telemetria trade LIVE: %s", e)
 
             except Exception as exc:
                 logger.error("Error ejecutando orden LIVE: %s", exc)
@@ -739,13 +793,14 @@ class NexusSystem:
             return 0
 
     def _get_open_positions_for_corr(self) -> List[Dict[str, Any]]:
-        """Obtiene posiciones abiertas formateadas para correlation_check."""
+        """Obtiene posiciones abiertas formateadas para correlation_penalty."""
         if self.mode == TradingMode.PAPER:
             return [
-                {"symbol": p["symbol"], "returns": [0.01, -0.005]}
+                {"symbol": p["symbol"]}
                 for p in self.paper_trader.positions
                 if p["status"] == "OPEN"
             ]
+        # LIVE: Por ahora no implementado la extracción vía API
         return []
 
     def _estimate_atr(self, df, period: int = 14) -> float:

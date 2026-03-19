@@ -1,0 +1,214 @@
+"""
+NEXUS Trading System — Walk-Forward Optimization Engine
+=========================================================
+Implementa WFO (Walk-Forward Optimization), dividiendo el histórico 
+en ventanas rodantes In-Sample (IS) para ajuste de parámetros y
+Out-of-Sample (OOS) para validación estricta y prevención de Curve Fitting.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import logging
+from datetime import timedelta
+from typing import List, Dict, Any, Tuple
+
+import pandas as pd
+import numpy as np
+
+try:
+    import backtrader as bt
+except ImportError:
+    bt = None
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+# Importamos la estrategia desde el runner existente
+from backtesting.backtest_runner import NexusStrategy, calculate_metrics
+
+logger = logging.getLogger("nexus.wfo")
+if not logger.handlers:
+    from config.settings import setup_logging
+    # setup basic logger
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(name)s | %(levelname)s | %(message)s")
+
+class WalkForwardOptimizer:
+    """Motor de validación institucional rolling-window."""
+    
+    def __init__(self, csv_path: str, is_days: int = 90, oos_days: int = 30):
+        """
+        Args:
+            csv_path: Ruta al archivo CSV procesado de Binance.
+            is_days: Longitud de la ventana In-Sample (entrenamiento).
+            oos_days: Longitud de la ventana Out-of-Sample (testeo).
+        """
+        self.csv_path = csv_path
+        self.is_days = is_days
+        self.oos_days = oos_days
+        
+        logger.info("Cargando dataset histórico para WFO: %s", csv_path)
+        self.raw_data = pd.read_csv(self.csv_path, parse_dates=['open_time'], index_col='open_time')
+        # Limpieza básica
+        cols = {"open": "open", "high": "high", "low": "low", "close": "close", "volume": "volume"}
+        self.raw_data = self.raw_data.rename(columns=cols)
+        self.raw_data.sort_index(inplace=True)
+        
+        logger.info("Dataset cargado: %d filas. Intervalo: %s a %s", 
+                    len(self.raw_data), self.raw_data.index[0], self.raw_data.index[-1])
+
+    def generate_windows(self) -> List[Dict[str, pd.Timestamp]]:
+        """Calcula el rango de cada iteración step-forward."""
+        start_date = self.raw_data.index[0]
+        end_date = self.raw_data.index[-1]
+        
+        windows = []
+        current_start = start_date
+        
+        while True:
+            is_end = current_start + timedelta(days=self.is_days)
+            oos_end = is_end + timedelta(days=self.oos_days)
+            
+            if oos_end > end_date:
+                # Truncamos si no avanza suficiente, o lo rompemos
+                break
+                
+            windows.append({
+                "window_idx": len(windows) + 1,
+                "is_start": current_start,
+                "is_end": is_end,
+                "oos_start": is_end,
+                "oos_end": oos_end
+            })
+            
+            # Anchored o Rolling? Esto es Rolling (nos movemos oos_days)
+            current_start += timedelta(days=self.oos_days)
+            
+        logger.info("Generadas %d ventanas Walk-Forward (IS: %dd, OOS: %dd)", len(windows), self.is_days, self.oos_days)
+        return windows
+
+    def _run_backtrader_slice(self, df_slice: pd.DataFrame, params: Dict[str, Any]) -> Tuple[float, List[float]]:
+        """Ejecuta un backtest aislado sobre un segmento de Pandas."""
+        if bt is None:
+            raise ImportError("backtrader no esta instalado.")
+            
+        cerebro = bt.Cerebro(stdstats=False)
+        cerebro.broker.setcash(10000.0)
+        cerebro.broker.setcommission(commission=0.001) # 0.1% Taker Binance
+        
+        data_feed = bt.feeds.PandasData(
+            dataname=df_slice,
+            open="open",
+            high="high",
+            low="low",
+            close="close",
+            volume="volume"
+        )
+        cerebro.adddata(data_feed)
+        
+        # Inyectar hiperparámetros de WFO a la Estrategia Nexus
+        cerebro.addstrategy(
+            NexusStrategy,
+            sl_atr_mult=params.get("sl_atr_mult", 2.0),
+            tp_atr_mult=params.get("tp_atr_mult", 3.0),
+            min_confidence=params.get("min_confidence", 0.65)
+        )
+        
+        # Para capturar la equity curve
+        cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='timereturn')
+        
+        logger.debug("Running cerebo on %d bars params=%s", len(df_slice), params)
+        results = cerebro.run()
+        
+        final_value = cerebro.broker.getvalue()
+        strat = results[0]
+        rets = strat.analyzers.timereturn.get_analysis()
+        
+        # Calcular Sharpe básico para ranking
+        returns_list = list(rets.values())
+        if len(returns_list) > 1 and np.std(returns_list) > 0:
+            sharpe = (np.mean(returns_list) / np.std(returns_list, ddof=1)) * np.sqrt(8760) # 1H
+        else:
+            sharpe = 0.0
+            
+        return sharpe, returns_list
+
+    def execute_wfo(self, param_grid: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Ejecuta el pipeline WFO entero.
+        Itera ventanas -> Busca mejor parametru In-Sample -> Lo aplica en Out-of-Sample -> Acumula retornos.
+        """
+        windows = self.generate_windows()
+        oos_equity_curve_stitched = [10000.0]  # Start with 10k base
+        wfo_log = []
+        
+        for w in windows:
+            idx = w["window_idx"]
+            logger.info("--- Procesando Ventana %d ---", idx)
+            logger.info("  IS:  %s a %s", w["is_start"].date(), w["is_end"].date())
+            logger.info("  OOS: %s a %s", w["oos_start"].date(), w["oos_end"].date())
+            
+            df_is = self.raw_data.loc[w["is_start"] : w["is_end"]]
+            df_oos = self.raw_data.loc[w["oos_start"] : w["oos_end"]]
+            
+            # --- 1. OPTIMIZACION IN-SAMPLE ---
+            best_sharpe = -999.0
+            best_params = param_grid[0]
+            
+            for params in param_grid:
+                sharpe, _ = self._run_backtrader_slice(df_is, params)
+                if sharpe > best_sharpe:
+                    best_sharpe = sharpe
+                    best_params = params
+                    
+            logger.info("  [IN-SAMPLE] Mejor Combinación: %s (Sharpe: %.2f)", best_params, best_sharpe)
+            
+            # --- 2. TEST OUT-OF-SAMPLE ---
+            # Aplicamos SIN TOCAR NADA los `best_params` encontrados
+            oos_sharpe, oos_returns = self._run_backtrader_slice(df_oos, best_params)
+            
+            logger.info("  [OUT-OF-SAMPLE] Sharpe: %.2f | Datos no vistos", oos_sharpe)
+            
+            # Stitching: Acumular rentabilidad pura OOS continua
+            current_capital = oos_equity_curve_stitched[-1]
+            for r in oos_returns:
+                current_capital *= (1 + r)
+                oos_equity_curve_stitched.append(current_capital)
+                
+            wfo_log.append({
+                "window": idx,
+                "best_params": best_params,
+                "is_sharpe": best_sharpe,
+                "oos_sharpe": oos_sharpe,
+                "is_bars": len(df_is),
+                "oos_bars": len(df_oos)
+            })
+            
+        return {
+            "wfo_log": wfo_log,
+            "stitched_equity": oos_equity_curve_stitched
+        }
+
+if __name__ == "__main__":
+    # Test stub
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv", type=str, default=str(os.path.join(os.path.dirname(__file__), "..", "data", "historical", "BTCUSDT_1h.csv")))
+    args = parser.parse_args()
+    
+    if os.path.exists(args.csv):
+        # Usamos WFO pequeño (3 meses train, 1 mes test) para demo
+        wfo = WalkForwardOptimizer(args.csv, is_days=90, oos_days=30)
+        
+        # Grid muy reducido para test rápido
+        grid = [
+            {"sl_atr_mult": 1.5, "tp_atr_mult": 2.5, "min_confidence": 0.60},
+            {"sl_atr_mult": 2.0, "tp_atr_mult": 3.0, "min_confidence": 0.65},
+        ]
+        
+        res = wfo.execute_wfo(grid)
+        print("\n--- Walk-Forward Completed ---")
+        for log in res["wfo_log"]:
+            print(f"Win {log['window']}: P={log['best_params']} | IS Sharpe={log['is_sharpe']:.2f} | OOS Sharpe={log['oos_sharpe']:.2f}")
+    else:
+        print(f"Error: CSV no encontrado en {args.csv}")

@@ -421,6 +421,24 @@ def calculate_metrics(
     gross_loss = abs(float(np.sum(returns[returns < 0])))
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
 
+    # ── Institutional Metrics (Fase 5) ────────────────────────────
+    # 1. Calmar Ratio: Annual Return / Max Drawdown
+    annualized_return = (total_return + 1) ** (periods_per_year / len(equity)) - 1
+    calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else float("inf")
+
+    # 2. Tail Ratio: 95th percentile return / Abs(5th percentile return)
+    # Medida del "Right Tail" (ganancias extremas) vs "Left Tail" (perdidas extremas)
+    p95 = np.percentile(returns, 95)
+    p5 = np.percentile(returns, 5)
+    tail_ratio = abs(p95 / p5) if p5 != 0 else 0.0
+
+    # 3. Information Ratio (Aproximación contra B&H)
+    # Suponiendo `buy_hold_return` se distribuye linealmente (simplificación)
+    bh_annualized = (buy_hold_return + 1) ** (periods_per_year / len(equity)) - 1 if len(equity) > 0 else 0
+    active_return = annualized_return - bh_annualized
+    tracking_error = std_ret * math.sqrt(periods_per_year) # Usando stdev absoluta como proxy temporal
+    information_ratio = active_return / tracking_error if tracking_error > 0 else 0.0
+
     return {
         "total_return": round(total_return * 100, 2),
         "buy_hold_return": round(buy_hold_return * 100, 2),  # type: ignore
@@ -429,6 +447,9 @@ def calculate_metrics(
         "max_drawdown": round(max_drawdown * 100, 2),  # type: ignore
         "win_rate": round(win_rate * 100, 2),  # type: ignore
         "profit_factor": round(profit_factor, 4),  # type: ignore
+        "calmar_ratio": round(float(calmar_ratio), 4) if calmar_ratio != float("inf") else float("inf"),
+        "tail_ratio": round(float(tail_ratio), 4),
+        "information_ratio": round(float(information_ratio), 4),
         "total_trades": len(trades),
         "initial_capital": initial_capital,
         "final_capital": round(float(equity[-1]), 2),  # type: ignore
@@ -452,6 +473,11 @@ def print_metrics(metrics: Dict[str, Any]) -> None:
     print(f"  Max Drawdown:     {metrics.get('max_drawdown', 0):.2f}%  (limite < 20%)")
     print(f"  Win Rate:         {metrics.get('win_rate', 0):.2f}%  (objetivo > 55%)")
     print(f"  Profit Factor:    {metrics.get('profit_factor', 0):.4f}")
+    print("-" * 60)
+    print("  Métricas Institucionales:")
+    print(f"  Calmar Ratio:     {metrics.get('calmar_ratio', 0):.4f}")
+    print(f"  Tail Ratio:       {metrics.get('tail_ratio', 0):.4f}  (> 1 indica asimetría positiva)")
+    print(f"  Information Ratio:{metrics.get('information_ratio', 0):.4f}  (vs Buy&Hold)")
     print("=" * 60)
 
     # Advertencias de optimización
@@ -738,6 +764,18 @@ def _build_html(
         <div class="metric-card">
             <div class="label">Profit Factor</div>
             <div class="value">{metrics.get('profit_factor',0):.2f}</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Calmar Ratio</div>
+            <div class="value">{metrics.get('calmar_ratio',0):.2f}</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Tail Ratio</div>
+            <div class="value" style="color:{'#00d4aa' if metrics.get('tail_ratio',0)>1 else '#ff4757'}">{metrics.get('tail_ratio',0):.2f}</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Info Ratio</div>
+            <div class="value">{metrics.get('information_ratio',0):.2f}</div>
         </div>
         <div class="metric-card">
             <div class="label">Total Trades</div>

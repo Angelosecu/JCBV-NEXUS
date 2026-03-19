@@ -35,6 +35,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from core.structured_logger import get_quant_logger
+
 logger = logging.getLogger("nexus.agent_arbitro")
 
 # ══════════════════════════════════════════════════════════════════════
@@ -496,7 +498,7 @@ class AgentArbitro:
         result = self._apply_risk_override(result, risk)
 
         # ── Registrar debate ──────────────────────────────────────────
-        self._log_debate(bull_state, bear_state, result, provider=used_provider)  # type: ignore
+        self._log_debate(bull_state, bear_state, result, provider=used_provider, symbol=symbol)  # type: ignore
 
         logger.info(
             "Arbitro [%s]: %s (conf=%.2f, size=%.1f%%) | %s",
@@ -865,6 +867,7 @@ class AgentArbitro:
         bear_state: Dict[str, Any],
         result: Dict[str, Any],
         provider: str = "heuristic",
+        symbol: str = "UNKNOWN",
     ) -> None:
         """Registra el debate en el historial."""
         log = DebateLog(
@@ -878,6 +881,24 @@ class AgentArbitro:
             provider=provider,
         )
         self._debate_history.append(log)
+
+        # JSONL Export for Dashboard (Phase 6)
+        try:
+            qlogger = get_quant_logger()
+            qlogger.log_agent_decision(
+                agent_name="AgentArbitro",
+                symbol=symbol,
+                confidence=log.confidence,
+                decision=log.final_decision,
+                reasoning=log.arbitro_reasoning,
+                metadata={
+                    "bull_strength": log.bull_strength,
+                    "bear_strength": log.bear_strength,
+                    "provider": log.provider
+                }
+            )
+        except Exception as e:
+            logger.error("Error exportando telemetria: %s", e)
 
         # Mantener solo los ultimos 50 debates
         if len(self._debate_history) > 50:

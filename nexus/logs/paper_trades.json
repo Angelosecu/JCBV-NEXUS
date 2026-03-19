@@ -8,7 +8,7 @@
         "take_profit": 42000.0,
         "confidence": 0.75,
         "commission": 2.0004,
-        "timestamp": "2026-03-18T16:20:23.716961-05:00",
+        "timestamp": "2026-03-18T20:18:54.623683-05:00",
         "status": "CLOSED_TP",
         "pnl": 197.10000000000002
     }

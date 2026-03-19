@@ -368,77 +368,7 @@ class QuantRiskManager:
             return False
         return True
 
-    # ══════════════════════════════════════════════════════════════════
-    #  MÉTODO 5: Correlation Check
-    # ══════════════════════════════════════════════════════════════════
-
-    def correlation_check(
-        self,
-        open_positions: List[Dict[str, Any]],
-        threshold: float = 0.85,
-    ) -> bool:
-        """
-        Verifica la correlación entre posiciones abiertas.
-
-        Usa scipy.stats.pearsonr entre los retornos de cada par.
-        Si cualquier par tiene correlación > threshold → retorna False (bloquear).
-
-        Args:
-            open_positions: Lista de dicts con key "returns" (List[float])
-            threshold:      Umbral de correlación para bloquear (default 0.85)
-
-        Returns:
-            True  = posiciones permitidas (sin correlación excesiva)
-            False = bloquear (correlación > threshold detectada)
-        """
-        if not _HAS_SCIPY:
-            logger.warning("scipy no disponible — correlation_check deshabilitado")
-            return True
-
-        if len(open_positions) < 2:
-            return True  # Nada que comparar
-
-        # Extraer retornos de cada posición
-        returns_lists: List[np.ndarray] = []
-        symbols: List[str] = []
-        for pos in open_positions:
-            rets = pos.get("returns", [])
-            sym = pos.get("symbol", "???")
-            if len(rets) >= 2:
-                returns_lists.append(np.array(rets, dtype=np.float64))
-                symbols.append(sym)
-
-        if len(returns_lists) < 2:
-            return True
-
-        # Comparar todos los pares
-        for i in range(len(returns_lists)):
-            for j in range(i + 1, len(returns_lists)):
-                # Igualar longitudes
-                min_len = min(len(returns_lists[i]), len(returns_lists[j]))  # type: ignore
-                if min_len < 2:
-                    continue
-
-                r1 = returns_lists[i][:min_len]  # type: ignore
-                r2 = returns_lists[j][:min_len]  # type: ignore
-
-                corr, p_value = scipy_stats.pearsonr(r1, r2)
-
-                logger.debug(
-                    "Correlación %s/%s: r=%.4f, p=%.4f",
-                    symbols[i], symbols[j], corr, p_value,  # type: ignore
-                )
-
-                if abs(corr) > threshold:  # type: ignore
-                    logger.warning(
-                        "BLOQUEO: Correlación excesiva entre %s y %s "
-                        "(r=%.4f > %.2f)",
-                        symbols[i], symbols[j], corr, threshold,  # type: ignore
-                    )
-                    return False
-
-        logger.info("Correlation check OK: todas las posiciones bajo umbral %.2f", threshold)
-        return True
+    # (Método correlation_check eliminado en favor de correlation_penalty)
 
     # ══════════════════════════════════════════════════════════════════
     #  Métodos auxiliares para el sistema principal
@@ -459,12 +389,144 @@ class QuantRiskManager:
             "circuit_breaker_active": self.is_circuit_breaker_active(),
         }
 
-    def __repr__(self) -> str:
-        status = "CB_ACTIVE" if self.is_circuit_breaker_active() else "OK"
-        return (
-            f"<QuantRiskManager status={status} "
-            f"positions={len(self._open_positions)}>"
+    # ══════════════════════════════════════════════════════════════════
+    #  MÉTODO 6: Correlation Penalty (Factor de Penalización)
+    # ══════════════════════════════════════════════════════════════════
+
+    def correlation_penalty(
+        self,
+        new_symbol: str,
+        existing_positions: List[Dict[str, Any]],
+        returns_data: Dict[str, List[float]],
+        threshold: float = 0.70,
+    ) -> float:
+        """
+        Calcula un factor de penalización (0.0 – 1.0) para el sizing de una
+        nueva posición basándose en la correlación con las posiciones existentes.
+
+        En lugar de bloquear binariamente (como correlation_check), este método
+        reduce proporcionalmente el tamaño de la posición según el grado de
+        correlación con el portafolio actual.
+
+        Fórmula:
+            penalty = max(0, 1 - avg_correlation_above_threshold)
+
+        Ejemplo:
+            - Sin posiciones existentes → penalty = 1.0 (sin penalización)
+            - Corr promedio = 0.90 → penalty = 0.10 (solo 10% del sizing)
+            - Corr promedio = 0.50 → penalty = 1.0 (bajo umbral, sin penalización)
+
+        Args:
+            new_symbol: Símbolo de la nueva posición a abrir
+            existing_positions: Lista de posiciones abiertas con {"symbol": str}
+            returns_data: Dict {symbol: [returns_list]} con retornos recientes
+            threshold: Umbral de correlación por debajo del cual no se penaliza
+
+        Returns:
+            Factor de penalización (0.0 = bloquear, 1.0 = sin penalización)
+        """
+        if not _HAS_SCIPY:
+            return 1.0
+
+        if not existing_positions:
+            return 1.0  # Sin posiciones abiertas → sin penalización
+
+        new_returns = returns_data.get(new_symbol, [])
+        if len(new_returns) < 5:
+            return 1.0  # Datos insuficientes
+
+        new_arr = np.array(new_returns, dtype=np.float64)
+        correlations_above: List[float] = []
+
+        for pos in existing_positions:
+            sym = pos.get("symbol", "")
+            pos_returns = returns_data.get(sym, [])
+            if len(pos_returns) < 5 or sym == new_symbol:
+                continue
+
+            pos_arr = np.array(pos_returns, dtype=np.float64)
+            min_len = min(len(new_arr), len(pos_arr))
+            if min_len < 5:
+                continue
+
+            corr, _ = scipy_stats.pearsonr(
+                new_arr[:min_len], pos_arr[:min_len]
+            )
+            abs_corr = abs(float(corr))  # type: ignore
+
+            if abs_corr > threshold:
+                correlations_above.append(abs_corr)
+
+                logger.info(
+                    "📊 Correlation %s↔%s: r=%.3f (above threshold %.2f)",
+                    new_symbol, sym, abs_corr, threshold,
+                )
+
+        if not correlations_above:
+            return 1.0  # Todas bajo el umbral
+
+        avg_corr = float(np.mean(correlations_above))
+        penalty = max(0.0, 1.0 - avg_corr)
+
+        logger.info(
+            "📊 Correlation Penalty [%s]: avg_corr=%.3f → sizing factor=%.2f",
+            new_symbol, avg_corr, penalty,
         )
+        return round(penalty, 4)  # type: ignore
+
+    # ══════════════════════════════════════════════════════════════════
+    #  MÉTODO 7: ATR-Based Position Sizing (Volatility-Scaled)
+    # ══════════════════════════════════════════════════════════════════
+
+    def atr_position_size(
+        self,
+        capital: float,
+        atr: float,
+        current_price: float,
+        risk_per_trade: float = 0.01,
+        atr_multiplier: float = 2.0,
+    ) -> float:
+        """
+        Calcula el tamaño de posición basado en la volatilidad actual (ATR),
+        siguiendo la metodología estándar de mesas institucionales.
+
+        Fórmula:
+            risk_amount = capital × risk_per_trade
+            dollar_risk_per_unit = atr × atr_multiplier
+            units = risk_amount / dollar_risk_per_unit
+            position_pct = (units × current_price / capital) × 100
+
+        Efecto:
+            - Alta volatilidad (ATR alto) → posición más pequeña
+            - Baja volatilidad (ATR bajo) → posición más grande
+
+        Args:
+            capital: Capital total disponible
+            atr: Average True Range actual del activo
+            current_price: Precio actual del activo
+            risk_per_trade: Porcentaje de capital a arriesgar por trade (default 1%)
+            atr_multiplier: Multiplicador del ATR para definir el stop-loss distance
+
+        Returns:
+            Tamaño de posición como porcentaje del capital (0.0 – 15.0)
+        """
+        if atr <= 0 or current_price <= 0 or capital <= 0:
+            logger.warning("ATR sizing: parámetros inválidos (atr=%.4f, price=%.2f, capital=%.2f)", atr, current_price, capital)
+            return 5.0  # Fallback conservador
+
+        risk_amount = capital * risk_per_trade
+        dollar_risk_per_unit = atr * atr_multiplier
+        units = risk_amount / dollar_risk_per_unit
+        position_pct = (units * current_price / capital) * 100
+
+        # Clamp entre 1% y 15% del portafolio
+        position_pct = max(1.0, min(position_pct, 15.0))
+
+        logger.info(
+            "📐 ATR Sizing: ATR=$%.2f, risk=$%.2f, units=%.6f → %.1f%% del capital",
+            atr, risk_amount, units, position_pct,
+        )
+        return round(position_pct, 2)  # type: ignore
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -652,42 +714,67 @@ def _run_validation() -> bool:
         f"Obtenido {cb3}",
     )
 
-    # ── CORRELATION CHECK ─────────────────────────────────────────
+    # ── ATR POSITION SIZING ───────────────────────────────────────
 
-    print("\n--- Correlation Check ---")
+    print("\n--- ATR Position Sizing ---")
+
+    # Test 1: Capital 10k, ATR $100, Price $2000, risk 1%, multiplier 2
+    # risk_amount = 10000 * 0.01 = 100
+    # dollar_risk_per_unit = 100 * 2 = 200
+    # units = 100 / 200 = 0.5
+    # pct = (0.5 * 2000 / 10000) * 100 = 10.0%
+    atr_pct1 = rm.atr_position_size(10000.0, 100.0, 2000.0, 0.01, 2.0)
+    check(
+        "ATR Sizing normal → 10.0%",
+        atr_pct1 == 10.0,
+        f"Esperado 10.0, obtenido {atr_pct1}",
+    )
+
+    # Test 2: Altísima volatilidad → se recorta por min/max cap (ej min 1.0%)
+    atr_pct2 = rm.atr_position_size(10000.0, 10000.0, 2000.0, 0.01, 2.0)
+    check(
+        "ATR Volatilidad extrema → clamp a 1.0%",
+        atr_pct2 == 1.0,
+        f"Esperado 1.0, obtenido {atr_pct2}",
+    )
+
+    # Test 3: Baja volatilidad → se recorta max cap (15.0%)
+    atr_pct3 = rm.atr_position_size(10000.0, 1.0, 2000.0, 0.01, 2.0)
+    check(
+        "ATR Baja volatilidad → clamp a 15.0%",
+        atr_pct3 == 15.0,
+        f"Esperado 15.0, obtenido {atr_pct3}",
+    )
+
+    # ── CORRELATION PENALTY ───────────────────────────────────────
+
+    print("\n--- Correlation Penalty ---")
 
     if _HAS_SCIPY:
-        # Test 1: Posiciones idénticas → correlación 1.0 → bloquear
-        pos_identical = [
-            {"symbol": "BTC", "returns": [0.01, 0.02, -0.01, 0.015, -0.005]},
-            {"symbol": "BTC2", "returns": [0.01, 0.02, -0.01, 0.015, -0.005]},
-        ]
-        cc1 = rm.correlation_check(pos_identical, threshold=0.85)
+        # Test 1: Posiciones idénticas → correlación 1.0 → penalty = 0.0
+        pos_identical = [{"symbol": "BTC"}]
+        ret_data_1 = {
+            "ETH": [0.01, 0.02, -0.01, 0.015, -0.005],
+            "BTC": [0.01, 0.02, -0.01, 0.015, -0.005],
+        }
+        cp1 = rm.correlation_penalty("ETH", pos_identical, ret_data_1, threshold=0.70)
         check(
-            "Correlación idéntica (r=1.0) > 0.85 → False (bloquear)",
-            cc1 is False,
-            f"Obtenido {cc1}",
+            "Correlación idéntica (r=1.0) → Penalty 0.0",
+            cp1 == 0.0,
+            f"Obtenido {cp1}",
         )
 
-        # Test 2: Posiciones no correlacionadas → permitir
-        pos_uncorr = [
-            {"symbol": "BTC", "returns": [0.01, -0.02, 0.03, -0.01, 0.02, -0.005, 0.015]},
-            {"symbol": "GOLD", "returns": [0.005, 0.01, -0.005, 0.02, -0.01, 0.015, -0.002]},
-        ]
-        cc2 = rm.correlation_check(pos_uncorr, threshold=0.85)
+        # Test 2: Correlación moderada (bajo umbral) → Penalty 1.0
+        pos_uncorr = [{"symbol": "GOLD"}]
+        ret_data_2 = {
+            "BTC":  [0.01, -0.02, 0.03, -0.01, 0.02, -0.005, 0.015],
+            "GOLD": [0.005, 0.01, -0.005, 0.02, -0.01, 0.015, -0.002],
+        }
+        cp2 = rm.correlation_penalty("BTC", pos_uncorr, ret_data_2, threshold=0.70)
         check(
-            "Correlación baja → True (permitir)",
-            cc2 is True,
-            f"Obtenido {cc2}",
-        )
-
-        # Test 3: Una sola posición → siempre permitir
-        pos_single = [{"symbol": "BTC", "returns": [0.01, 0.02]}]
-        cc3 = rm.correlation_check(pos_single, threshold=0.85)
-        check(
-            "Una sola posición → True (nada que comparar)",
-            cc3 is True,
-            f"Obtenido {cc3}",
+            "Correlación baja → Penalty 1.0 (sin castigo)",
+            cp2 == 1.0,
+            f"Obtenido {cp2}",
         )
     else:
         print("  [SKIP] scipy no instalado — correlation checks omitidos")
