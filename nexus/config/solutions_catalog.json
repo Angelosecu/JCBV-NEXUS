@@ -1,0 +1,40 @@
+[
+  {
+    "error_type": "JSONDecodeError",
+    "match_keywords": [
+      "llm_historical_cache",
+      "Expecting value"
+    ],
+    "description": "Cache LLM corrupta",
+    "auto_fix_action": "clear_llm_cache",
+    "severity": "medium",
+    "added_at": "2026-03-27T16:51:17.023268-05:00",
+    "times_used": 0
+  },
+  {
+    "error_type": "ConnectionError",
+    "match_keywords": [
+      "groq.com",
+      "googleapis.com",
+      "timeout"
+    ],
+    "description": "Timeout de conexión a proveedor LLM",
+    "auto_fix_action": "restart_provider",
+    "severity": "high",
+    "added_at": "2026-03-27T16:51:17.025362-05:00",
+    "times_used": 0
+  },
+  {
+    "error_type": "OSError",
+    "match_keywords": [
+      "No space left",
+      "disk full",
+      "vault/tmp"
+    ],
+    "description": "Disco lleno o datos temporales acumulados",
+    "auto_fix_action": "purge_stale_data",
+    "severity": "critical",
+    "added_at": "2026-03-27T16:51:17.027708-05:00",
+    "times_used": 0
+  }
+]

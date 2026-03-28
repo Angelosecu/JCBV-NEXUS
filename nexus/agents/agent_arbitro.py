@@ -237,6 +237,12 @@ class AgentArbitro:
         self._groq_idx = 0
         self._gemini_idx = 0
 
+        # ── 24h API Key Blacklist ────────────────────────────────────────
+        # Maps: key_fingerprint -> epoch timestamp when blacklist expires
+        self._blacklisted_keys: Dict[str, float] = {}
+        _BLACKLIST_DURATION_SECS = 86400  # 24 horas
+        self._BLACKLIST_SECS = _BLACKLIST_DURATION_SECS
+
     def _load_global_cache(self) -> None:
         """Carga la caché global de Backtesting desde el disco para evitar re-inferencias WFO."""
         if os.path.exists(self._global_wfo_cache_path):
@@ -553,7 +559,8 @@ class AgentArbitro:
         self._log_debate(bull_state, bear_state, result, provider=used_provider, symbol=symbol)  # type: ignore
 
         logger.info(
-            "Arbitro [%s]: %s (conf=%.2f, size=%.1f%%) | %s",
+            "[%s] Arbitro [%s]: %s (conf=%.2f, size=%.1f%%) | %s",
+            symbol,
             used_provider,
             result["decision"],
             result["confidence"],
@@ -581,42 +588,88 @@ class AgentArbitro:
     #  Rotacion de Cuentas y Deliberacion con LLM
     # ══════════════════════════════════════════════════════════════════
 
+    def _key_fingerprint(self, key: str) -> str:
+        """Huella de 8 chars del key para logs (sin exponer el token completo)."""
+        return f"...{key[-6:]}" if len(key) >= 6 else key
+
+    def _is_key_blacklisted(self, key: str) -> bool:
+        """Retorna True si la key está en cuarentena de 24h por rate-limit."""
+        fp = self._key_fingerprint(key)
+        expires = self._blacklisted_keys.get(fp, 0)
+        if time.time() < expires:
+            remaining = int((expires - time.time()) / 3600)
+            logger.debug("⏳ Key %s en blacklist — %dh restantes", fp, remaining)
+            return True
+        # Si expiró, limpiar
+        if fp in self._blacklisted_keys:
+            del self._blacklisted_keys[fp]
+            logger.info("♻️ Key %s restaurada del blacklist (24h expiradas)", fp)
+        return False
+
+    def _blacklist_key(self, key: str, provider_name: str) -> None:
+        """Coloca una key agotada en cuarentena de 24h."""
+        fp = self._key_fingerprint(key)
+        expires_at = time.time() + self._BLACKLIST_SECS
+        self._blacklisted_keys[fp] = expires_at
+        from datetime import datetime
+        dt = datetime.fromtimestamp(expires_at).strftime("%Y-%m-%d %H:%M")
+        logger.warning(
+            "🚫 [Blacklist 24h] %s key %s agotada → cuarentena hasta %s",
+            provider_name, fp, dt,
+        )
+
     def _rotate_api_key(self, provider: LLMProvider) -> bool:
-        """Rota la API Key y reconstruye la cadena LLM activa si existen multiples tokens.
-           Alterna entre proveedores automáticamente si el stack primario se agota.
+        """
+        Rota la API Key al siguiente token disponible (no blacklisteado).
+        Si todos están agotados, hace failover de proveedor.
+        Cada key agotada queda en blacklist 24h para evitar reintentos inútiles.
         """
         if provider == LLMProvider.GROQ:
-            if len(self._groq_keys) > 0:
-                next_idx = (self._groq_idx + 1) % len(self._groq_keys)
-                if next_idx == 0 and len(self._gemini_keys) > 0:
-                    logger.warning("⚠️ Todas las cuentas GROQ (Llama 3) de este ciclo exhaustas. INICIANDO FAILOVER MAESTRO A GEMINI.")
-                    return self.switch_provider(LLMProvider.GEMINI)
-                
+            keys = self._groq_keys
+            start_idx = self._groq_idx
+            n = len(keys)
+
+            # Buscar la próxima key disponible (no blacklisteada)
+            for _ in range(n):
+                next_idx = (self._groq_idx + 1) % n
                 self._groq_idx = next_idx
-                key_preview = f"...{self._groq_keys[self._groq_idx][-4:]}" if self._groq_keys[self._groq_idx] else "???"
-                logger.info("🔑 Rotando cuenta GROQ a slot %d (Token: %s)", self._groq_idx, key_preview)
-            else:
-                return self.switch_provider(LLMProvider.GEMINI)
+                candidate = keys[next_idx] if keys else ""
+                if candidate and not self._is_key_blacklisted(candidate):
+                    fp = self._key_fingerprint(candidate)
+                    logger.info("🔑 Rotando GROQ → slot %d (token: %s)", next_idx, fp)
+                    return self._init_provider(LLMProvider.GROQ)
+                # Si ya dimos la vuelta completa, todas están blacklisteadas
+                if next_idx == start_idx:
+                    break
+
+            # Todas las GROQ agotadas → failover a GEMINI
+            logger.warning("⚠️ Todas las cuentas GROQ agotadas. FAILOVER MAESTRO A GEMINI.")
+            return self.switch_provider(LLMProvider.GEMINI)
 
         elif provider == LLMProvider.GEMINI:
-            if len(self._gemini_keys) > 0:
-                next_idx = (self._gemini_idx + 1) % len(self._gemini_keys)
-                if next_idx == 0:
-                    logger.warning("⚠️ Ambos ciclos de agentes (GROQ y GEMINI) agotados. Forzando enfriamiento (5s)...")
-                    self.switch_provider(LLMProvider.GROQ)
-                    time.sleep(5)
-                    return True
-                
+            keys = self._gemini_keys
+            start_idx = self._gemini_idx
+            n = len(keys)
+
+            for _ in range(n):
+                next_idx = (self._gemini_idx + 1) % n
                 self._gemini_idx = next_idx
-                key_preview = f"...{self._gemini_keys[self._gemini_idx][-4:]}" if self._gemini_keys[self._gemini_idx] else "???"
-                logger.info("🔑 Rotando cuenta GEMINI a slot %d (Token: %s)", self._gemini_idx, key_preview)
-            else:
-                time.sleep(5)
-                return True
-                
-        provider_to_init = self._active_provider
-        if provider_to_init is not None:
-            return self._init_provider(provider_to_init)
+                candidate = keys[next_idx] if keys else ""
+                if candidate and not self._is_key_blacklisted(candidate):
+                    fp = self._key_fingerprint(candidate)
+                    logger.info("🔑 Rotando GEMINI → slot %d (token: %s)", next_idx, fp)
+                    return self._init_provider(LLMProvider.GEMINI)
+                if next_idx == start_idx:
+                    break
+
+            # Todas GROQ + GEMINI agotadas → modo heurístico hasta próxima rotación
+            logger.critical(
+                "🔴 TODOS los tokens LLM agotados (GROQ + GEMINI). "
+                "Sistema en modo HEURÍSTICO hasta que las cuarentenas expiren."
+            )
+            self._initialized = False
+            return False
+
         return False
 
     def _deliberate_with_llm(
@@ -671,12 +724,28 @@ class AgentArbitro:
                 last_error = str(exc)
                 logger.warning("Error LLM (intento %d/%d): %s", attempt + 1, max_attempts, exc)
                 
-                # Check for rate limiting to trigger rotation
-                if "429" in last_error or "rate limit" in last_error.lower() or "quota" in last_error.lower():
-                    logger.warning("⚠️ Límite de tokens detectado. Activando Rotador de Cuentas...")
+                # Check for rate limiting to trigger rotation + blacklist
+                is_rate_limit = (
+                    "429" in last_error
+                    or "rate limit" in last_error.lower()
+                    or "quota" in last_error.lower()
+                    or "resource_exhausted" in last_error.lower()
+                    or "tokens per" in last_error.lower()
+                )
+                if is_rate_limit:
+                    logger.warning("⚠️ Límite de tokens detectado. Blacklisting key actual → Rotando...")
                     provider_to_rotate = self._active_provider
                     if provider_to_rotate is not None:
+                        # Obtener key actual para blacklistearla
+                        if provider_to_rotate == LLMProvider.GROQ and self._groq_keys:
+                            exhausted_key = self._groq_keys[self._groq_idx]
+                            self._blacklist_key(exhausted_key, "GROQ")
+                        elif provider_to_rotate == LLMProvider.GEMINI and self._gemini_keys:
+                            exhausted_key = self._gemini_keys[self._gemini_idx]
+                            self._blacklist_key(exhausted_key, "GEMINI")
+                        # Rotar AHORA al siguiente disponible
                         self._rotate_api_key(provider_to_rotate)
+
 
         return self._hold_decision(f"Error parseo JSON y cuotas tras {max_attempts} reintentos y rotaciones: {last_error}")
 

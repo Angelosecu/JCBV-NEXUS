@@ -1,0 +1,6 @@
+{"timestamp": "2026-03-27T16:51:16.979996-05:00", "type": "maintenance", "action": "test_purge", "details": "Purga de prueba exitosa", "data": {"files_removed": 0}}
+{"timestamp": "2026-03-27T16:51:43.645057-05:00", "type": "maintenance", "action": "Log Rotation Check", "details": "Verificación completa de 3 tiers de logging. Sin purgas necesarias.", "data": {"critical_usage": "2%", "medium_usage": "1%", "low_usage": "0%"}}
+{"timestamp": "2026-03-27T17:06:55.830292-05:00", "type": "maintenance", "action": "test_purge", "details": "Purga de prueba exitosa", "data": {"files_removed": 0}}
+{"timestamp": "2026-03-27T17:07:17.186524-05:00", "type": "maintenance", "action": "Log Rotation Check", "details": "Verificación completa de 3 tiers de logging. Sin purgas necesarias.", "data": {"critical_usage": "2%", "medium_usage": "1%", "low_usage": "0%"}}
+{"timestamp": "2026-03-27T17:09:22.980346-05:00", "type": "maintenance", "action": "test_purge", "details": "Purga de prueba exitosa", "data": {"files_removed": 0}}
+{"timestamp": "2026-03-27T17:09:39.000662-05:00", "type": "maintenance", "action": "Log Rotation Check", "details": "Verificación completa de 3 tiers de logging. Sin purgas necesarias.", "data": {"critical_usage": "2%", "medium_usage": "1%", "low_usage": "0%"}}

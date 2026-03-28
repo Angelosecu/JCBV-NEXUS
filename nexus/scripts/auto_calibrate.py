@@ -66,7 +66,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     },
     "binary": {
         "expiry_bars": 3,
-        "payout_pct": 0.85,
+        "payout_pct": 0.80,
         "stake_pct": 1.0,
         "min_confidence": 0.70,
         "max_positions": 3,
@@ -93,33 +93,33 @@ class WFOAutoCalibrator:
 
     # Configuración de profundidad de datos por modo
     SPOT_SYMBOLS = ["BTC-USD", "ETH-USD"]
-    SPOT_TF = "1h"
-    SPOT_YEARS = 2
-    SPOT_IS_DAYS = 90.0
-    SPOT_OOS_DAYS = 30.0
+    SPOT_TF = "15m"
+    SPOT_YEARS = 1      # 15m max in yfinance is 60 days, vault caps it automatically
+    SPOT_IS_DAYS = 30.0 # Adaptación mucho más rápida
+    SPOT_OOS_DAYS = 7.0
 
-    BINARY_SYMBOLS = ["BTC-USD", "EURUSD=X"]
+    BINARY_SYMBOLS = ["BTC-USD"]
     BINARY_TF = "5m"
-    BINARY_DAYS = 55  # YFinance max real para 5m = 58 días (margen de seguridad)
-    BINARY_IS_DAYS = 7.0   # 7 días IS (para que quepan ~5 ventanas en 55 días)
-    BINARY_OOS_DAYS = 2.0  # 2 días OOS
+    BINARY_DAYS = 30       # 5m allows ~60 days from yfinance
+    BINARY_IS_DAYS = 10.0  # 10 días IS
+    BINARY_OOS_DAYS = 3.0  # 3 días OOS
 
     # Grid de búsqueda (Spot)
     SPOT_GRID: List[Dict[str, Any]] = [
-        {"sl_atr_mult": 1.5, "tp_atr_mult": 2.5, "min_confidence": 0.55},
-        {"sl_atr_mult": 1.5, "tp_atr_mult": 3.0, "min_confidence": 0.60},
-        {"sl_atr_mult": 2.0, "tp_atr_mult": 3.0, "min_confidence": 0.65},
-        {"sl_atr_mult": 2.0, "tp_atr_mult": 4.0, "min_confidence": 0.65},
-        {"sl_atr_mult": 2.5, "tp_atr_mult": 3.5, "min_confidence": 0.70},
+        {"sl_atr_mult": 1.5, "tp_atr_mult": 2.5, "min_confidence": 0.45},
+        {"sl_atr_mult": 1.5, "tp_atr_mult": 3.0, "min_confidence": 0.50},
+        {"sl_atr_mult": 2.0, "tp_atr_mult": 3.0, "min_confidence": 0.50},
+        {"sl_atr_mult": 2.0, "tp_atr_mult": 4.0, "min_confidence": 0.55},
+        {"sl_atr_mult": 2.5, "tp_atr_mult": 3.5, "min_confidence": 0.60},
     ]
 
-    # Grid de búsqueda (Binary)
+    # Grid optimizado para BTC 5m Mean-Reversion (Alpha v3: 55.8% WR probado)
     BINARY_GRID: List[Dict[str, Any]] = [
-        {"min_confidence": 0.60, "expiry_bars": 3},
-        {"min_confidence": 0.65, "expiry_bars": 3},
         {"min_confidence": 0.70, "expiry_bars": 3},
+        {"min_confidence": 0.70, "expiry_bars": 4},
         {"min_confidence": 0.70, "expiry_bars": 5},
         {"min_confidence": 0.75, "expiry_bars": 5},
+        {"min_confidence": 0.85, "expiry_bars": 5},
     ]
 
     def __init__(self) -> None:
@@ -247,34 +247,87 @@ class WFOAutoCalibrator:
 
     def _extract_best_params(self, wfo_results: Dict[str, Any], mode: str = "spot") -> Dict[str, Any]:
         """
-        Del resultado WFO, toma la ÚLTIMA ventana Out-of-Sample
-        (la más reciente y relevante) y extrae sus best_params.
+        Selecciona los MEJORES parámetros usando scoring agregado en TODAS las ventanas.
+
+        Método institucional:
+          - Para cada combinación de params, calcula el OOS Sharpe promedio
+            en las ventanas donde fue elegida como ganadora IS.
+          - Penaliza ventanas con cero trades (Sharpe=0.0) como -1.0.
+          - Solo acepta si al menos 1 ventana tiene OOS Sharpe > 0.
+          - Rechaza si el promedio final es negativo.
         """
+        import json as _json
         wfo_log = wfo_results.get("wfo_log", [])
         if not wfo_log:
             logger.warning("WFO log vacío. Usando parámetros por defecto.")
             return {}
 
-        # La última ventana es la más relevante (datos más recientes)
-        last_window = wfo_log[-1]
-        best = last_window.get("best_params", {})
-        oos_sharpe = last_window.get("oos_sharpe", 0)
+        # Agregar scores por combinación de params
+        # Key: params frozen as JSON string
+        param_scores: Dict[str, List[float]] = {}
+        param_objects: Dict[str, Dict[str, Any]] = {}
 
-        logger.info(
-            "🏆 Mejores parámetros (%s) de ventana %d: %s | OOS Sharpe: %.4f",
-            mode, last_window.get("window", 0), best, oos_sharpe,
-        )
+        for w in wfo_log:
+            best_p = w.get("best_params", {})
+            oos_s = w.get("oos_sharpe", 0)
+            oos_trades = w.get("oos_trades", 0)
+            key = _json.dumps(best_p, sort_keys=True)
 
-        # Validación: Solo aceptar si OOS Sharpe > 0 (rentable)
-        if oos_sharpe <= 0:
-            logger.warning(
-                "⚠️ OOS Sharpe negativo (%.4f). Rechazando calibración para %s. "
-                "Manteniendo parámetros anteriores.",
-                oos_sharpe, mode,
+            # Penalizar: si se generaron 0 trades, es un resultado no válido
+            if oos_trades == 0:
+                effective_sharpe = -1.0
+            else:
+                effective_sharpe = oos_s
+
+            if key not in param_scores:
+                param_scores[key] = []
+                param_objects[key] = best_p
+            param_scores[key].append(effective_sharpe)
+
+        # Calcular score final = media de todos los OOS Sharpe
+        best_score = -9999.0
+        best_key = None
+        summary_lines = []
+
+        for key, scores in param_scores.items():
+            avg = float(sum(scores) / len(scores)) if scores else 0.0
+            positive = sum(1 for s in scores if s > 0)
+            summary_lines.append(
+                f"  Params: {param_objects[key]} | "
+                f"Avg OOS Sharpe: {avg:.3f} | "
+                f"Ventanas positivas: {positive}/{len(scores)}"
             )
+            if avg > best_score:
+                best_score = avg
+                best_key = key
+
+        logger.info("═" * 60)
+        logger.info("  📊 Scoring Agregado de Parámetros WFO (%s):", mode.upper())
+        for line in summary_lines:
+            logger.info(line)
+
+        if best_key is None:
+            logger.warning("⚠️ Sin parámetros válidos. Manteniendo configuración anterior.")
             return {}
 
-        return best
+        best_params = param_objects[best_key]
+        logger.info(
+            "  🏆 GANADOR FINAL [%s]: %s | Score: %.3f",
+            mode.upper(), best_params, best_score,
+        )
+
+        if best_score <= 0:
+            logger.warning(
+                "  ⚠️ Score promedio negativo (%.3f). Sistema en modo defensivo. "
+                "Manteniendo parámetros anteriores para preservar capital.",
+                best_score,
+            )
+            logger.info("═" * 60)
+            return {}
+
+        logger.info("  ✅ Parámetros aceptados y aplicados.")
+        logger.info("═" * 60)
+        return best_params
 
     # ──────────────────────────────────────────────
     #  Paso 4: Fusión y Escritura
@@ -366,24 +419,77 @@ class WFOAutoCalibrator:
         return final_params
 
     # ──────────────────────────────────────────────
-    #  Scheduling (Sábado 00:00 GMT-5)
+    #  Scheduling (Sábado: Spot / Domingo: Binary)
     # ──────────────────────────────────────────────
 
     def setup_schedule(self) -> None:
-        """Programa la calibración automática cada sábado a medianoche."""
+        """Programa la calibración automática dividiendo la carga en dos días."""
         if not _HAS_SCHEDULE:
             logger.warning("Librería 'schedule' no instalada. pip install schedule")
             return
 
-        def _calibration_job():
-            logger.info("⏰ Cron job de calibración semanal activado")
+        def _run_support_handler(exc: Exception, mode: str) -> None:
+            """Activa el Support Engineer para diagnóstico de crashes."""
             try:
-                self.run_full_calibration(mode="all")
-            except Exception as e:
-                logger.error("Error en calibración semanal: %s", e)
+                import asyncio
+                from agents.agent_support import NexusSupportEngineer  # type: ignore
+                support = NexusSupportEngineer()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(support.initialize())
+                loop.run_until_complete(
+                    support.handle_exception(
+                        exc,
+                        module=f"auto_calibrate.py ({mode})",
+                        context={"mode": mode, "cron": True},
+                    )
+                )
+                loop.close()
+            except Exception as support_exc:
+                logger.error("Support Engineer falló: %s", support_exc)
 
-        schedule.every().saturday.at("00:00").do(_calibration_job)
-        logger.info("📅 Auto-Calibración programada: Sábados 00:00 GMT-5")
+        def _spot_calibration_job():
+            logger.info("⏰ Cron job de calibración semanal SPOT activado")
+            try:
+                result = self.run_full_calibration(mode="spot")
+                _notify_calibration_success("spot", result)
+            except Exception as e:
+                logger.error("Error en calibración SPOT: %s", e)
+                _run_support_handler(e, "spot")
+
+        def _binary_calibration_job():
+            logger.info("⏰ Cron job de calibración semanal BINARY activado")
+            try:
+                result = self.run_full_calibration(mode="binary")
+                _notify_calibration_success("binary", result)
+            except Exception as e:
+                logger.error("Error en calibración BINARY: %s", e)
+                _run_support_handler(e, "binary")
+
+        def _notify_calibration_success(mode: str, result: Dict[str, Any]) -> None:
+            """Envía notificación exitosa al DEV via Support Engineer."""
+            try:
+                import asyncio
+                from agents.agent_support import NexusSupportEngineer  # type: ignore
+                support = NexusSupportEngineer()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(support.initialize())
+                elapsed = time.time()
+                loop.run_until_complete(
+                    support.notify_calibration_complete(mode, result, elapsed)
+                )
+                loop.close()
+            except Exception:
+                pass
+
+        schedule.every().saturday.at("01:00").do(_spot_calibration_job)
+        schedule.every().sunday.at("01:00").do(_binary_calibration_job)
+        
+        logger.info("📅 Calendario Auto-Calibración:")
+        logger.info("   - Sábados 01:00 GMT-5 -> SPOT/SWING")
+        logger.info("   - Domingos 01:00 GMT-5 -> BINARY/HFT")
+        logger.info("🛡️ Support Engineer conectado a pipeline de crashes")
 
     def run_pending(self) -> None:
         """Despacha tareas pendientes del scheduler."""

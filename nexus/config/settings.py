@@ -47,6 +47,16 @@ OPENAI_API_KEY: str = OPENAI_API_KEYS[0] if OPENAI_API_KEYS else ""
 GROQ_API_KEY: str = GROQ_API_KEYS[0] if GROQ_API_KEYS else ""
 GOOGLE_API_KEY: str = GOOGLE_API_KEYS[0] if GOOGLE_API_KEYS else ""
 
+# ──────────────────────────────────────────────
+#  Telegram Config (User + Developer Channels)
+# ──────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Developer Pipeline (alertas técnicas / crasheos / mantenimiento)
+TELEGRAM_DEV_BOT_TOKEN: str = os.getenv("TELEGRAM_DEV_BOT_TOKEN", "") or TELEGRAM_BOT_TOKEN
+TELEGRAM_DEV_CHAT_ID: str = os.getenv("TELEGRAM_DEV_CHAT_ID", "")
+
 
 # ──────────────────────────────────────────────
 #  Parámetros de Trading

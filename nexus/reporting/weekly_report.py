@@ -491,7 +491,7 @@ class NexusTelegramReporter:
     #  Helpers — Envío
     # ══════════════════════════════════════════════════════════════
 
-    async def _send(self, text: str) -> None:
+    async def _send(self, text: str, parse_mode: Any = ParseMode.MARKDOWN) -> None:
         """Envía un mensaje de texto al chat configurado."""
         if not self._initialized or not self._bot:
             logger.debug("Bot no inicializado. Mensaje (local): %s", text[:100])
@@ -501,7 +501,7 @@ class NexusTelegramReporter:
             await self._bot.send_message(
                 chat_id=self.chat_id,
                 text=text,
-                parse_mode=ParseMode.MARKDOWN,
+                parse_mode=parse_mode,
             )
         except Exception:
             # Fallback sin parse_mode si Markdown falla
@@ -545,7 +545,7 @@ def get_reporter() -> NexusTelegramReporter:
     """Obtiene la instancia del reporter, creándola si no existe."""
     global _reporter
     if _reporter is None:
-        from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+        from nexus.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
         _reporter = NexusTelegramReporter(
             bot_token=TELEGRAM_BOT_TOKEN,
             chat_id=TELEGRAM_CHAT_ID,
