@@ -255,6 +255,8 @@ class HFTDaemon:
                     f"<i>Pivotando operaciones.</i>"
                 )
                 await self.telegram._send(msg_suspend, parse_mode="HTML")
+            else:
+                logger.warning(f"⚠️ Error en ejecución ({asset}): {error_msg}. Rotando activo...")
 
     async def _check_active_trades(self):
         """ Revisa los tickets activos expirados y reporta ganancias. """
@@ -309,12 +311,19 @@ class HFTDaemon:
                 session = self.session_mgr.get_current_session()
                 vip_assets = self.session_mgr.get_vip_assets_for_current_session(include_crypto=True)
                 
-                # REGLA BLACKROCK: Si es Fin de Semana, eliminar pares defectuosos OTC por completo
+                # REGLA BLACKROCK: Si es Fin de Semana, nos aseguramos que SOLO operamos OTC 
+                # (en lugar de borrarlos por error como antes)
                 if session == MarketSession.WEEKEND_OTC:
-                    vip_assets = [a for a in vip_assets if "OTC" not in a.upper()]
+                    vip_assets = [a for a in vip_assets if "OTC" in a.upper() or "-op" in a.lower()]
                     
                 # Filtro Dinámico: Eliminar los activos suspendidos de esta sesión para no perder tiempo
+                original_count = len(vip_assets)
                 vip_assets = [a for a in vip_assets if a not in self.suspended_assets]
+                
+                if len(vip_assets) < original_count:
+                    logger.info(f"🔄 Rotación Activa: {original_count - len(vip_assets)} activos en lista negra. Escaneando {len(vip_assets)} activos restantes.")
+                else:
+                    logger.info(f"📡 Escaneando pool de {len(vip_assets)} activos VIP en sesión {session}.")
                     
                 # Evaluar cada activo
                 tasks = [self._process_asset(asset) for asset in vip_assets]
