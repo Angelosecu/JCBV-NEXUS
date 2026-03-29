@@ -35,6 +35,7 @@ from binance.enums import HistoricalKlinesType  # type: ignore
 from config.settings import (  # type: ignore
     BINANCE_API_KEY,
     BINANCE_API_SECRET,
+    DATABASE_URL,
     trading_config,
 )
 
@@ -77,10 +78,10 @@ class KlineRecord(Base):
 
 
 class DataStore:
-    """Almacenamiento persistente de datos de mercado con SQLAlchemy + SQLite."""
+    """Almacenamiento persistente de datos de mercado con SQLAlchemy."""
 
-    def __init__(self, db_path: str = "nexus_data.db") -> None:
-        self.db_path = db_path
+    def __init__(self, db_url: Optional[str] = None) -> None:
+        self.db_url = db_url or DATABASE_URL
         self._engine = None
         self._SessionFactory = None
 
@@ -88,14 +89,19 @@ class DataStore:
 
     def initialize(self) -> None:
         """Crea engine, session factory y tablas si no existen."""
+        # Configuración específica para SQLite
+        connect_args = {}
+        if self.db_url.startswith("sqlite"):
+            connect_args = {"check_same_thread": False}
+
         self._engine = create_engine(
-            f"sqlite:///{self.db_path}",
+            self.db_url,
             echo=False,
-            connect_args={"check_same_thread": False},
+            connect_args=connect_args,
         )
         Base.metadata.create_all(self._engine)
         self._SessionFactory = sessionmaker(bind=self._engine)
-        logger.info("DataStore inicializado → %s", self.db_path)
+        logger.info("DataStore inicializado → %s", self.db_url)
 
     def _session(self) -> Session:
         return self._SessionFactory()  # type: ignore
@@ -374,7 +380,7 @@ class BinanceDataHandler:
         self,
         symbols: Optional[List[str]] = None,
         timeframes: Optional[Tuple[str, ...]] = None,
-        db_path: str = "nexus_data.db",
+        db_url: Optional[str] = None,
         api_key: str = "",
         api_secret: str = "",
     ) -> None:
@@ -384,7 +390,7 @@ class BinanceDataHandler:
         self.api_secret = api_secret or BINANCE_API_SECRET
 
         # Almacenamiento
-        self.store = DataStore(db_path=db_path)
+        self.store = DataStore(db_url=db_url)
         self.cleaner = DataCleaner()
 
         # AsyncClient & WebSocket

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  nexus-app:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - nexus_logs:/app/nexus/logs
+      - nexus_data:/app/nexus/data
+      - ./nexus:/app/nexus
+    environment:
+      - DATABASE_URL=postgresql://nexus_user:nexus_password@db:5432/nexus_db
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  nexus-dashboard:
+    build:
+      context: .
+      target: runtime
+    command: python nexus/dashboard/app.py
+    depends_on:
+      - nexus-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./nexus:/app/nexus
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  db:
+    image: timescale/timescaledb:latest-pg15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=nexus_db
+      - POSTGRES_USER=nexus_user
+      - POSTGRES_PASSWORD=nexus_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus_user -d nexus_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  nexus_logs:
+  nexus_data:
+  postgres_data:

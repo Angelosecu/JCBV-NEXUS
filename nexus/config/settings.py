@@ -41,11 +41,15 @@ def _load_api_keys(prefix: str) -> List[str]:
 OPENAI_API_KEYS: List[str] = _load_api_keys("OPENAI_API_KEY")
 GROQ_API_KEYS: List[str] = _load_api_keys("GROQ_API_KEY")
 GOOGLE_API_KEYS: List[str] = _load_api_keys("GOOGLE_API_KEY")
+BINANCE_API_KEYS: List[str] = _load_api_keys("BINANCE_API_KEY")
+BINANCE_API_SECRETS: List[str] = _load_api_keys("BINANCE_API_SECRET")
 
 # Legacy strings fallback
 OPENAI_API_KEY: str = OPENAI_API_KEYS[0] if OPENAI_API_KEYS else ""
 GROQ_API_KEY: str = GROQ_API_KEYS[0] if GROQ_API_KEYS else ""
 GOOGLE_API_KEY: str = GOOGLE_API_KEYS[0] if GOOGLE_API_KEYS else ""
+BINANCE_API_KEY: str = BINANCE_API_KEYS[0] if BINANCE_API_KEYS else ""
+BINANCE_API_SECRET: str = BINANCE_API_SECRETS[0] if BINANCE_API_SECRETS else ""
 
 # ──────────────────────────────────────────────
 #  Telegram Config (User + Developer Channels)
@@ -131,6 +135,12 @@ class BacktestConfig:
     initial_capital: float = 10_000.0
     commission_pct: float = 0.001           # 0.1 % comisión
     slippage_pct: float = 0.0005            # 0.05 % deslizamiento
+
+
+# ──────────────────────────────────────────────
+#  Base de Datos
+# ──────────────────────────────────────────────
+DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{os.path.normpath(os.path.join(os.getcwd(), 'nexus_data.db'))}")
 
 
 # ──────────────────────────────────────────────
