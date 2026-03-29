@@ -5,6 +5,7 @@
 python-binance>=1.0.19
 ccxt>=4.4.56
 websockets>=14.1
+iqoptionapi @ git+https://github.com/Lu-Yi-Hsun/iqoptionapi.git
 
 # Machine Learning & Deep Learning
 tensorflow-cpu>=2.18.0

@@ -33,6 +33,22 @@ services:
       - .env
     restart: unless-stopped
 
+  nexus-iq-engine:
+    build:
+      context: .
+      target: runtime
+    command: python nexus/iq_main.py
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - nexus_logs:/app/nexus/logs
+      - nexus_data:/app/nexus/data
+      - ./nexus:/app/nexus
+    env_file:
+      - .env
+    restart: unless-stopped
+
   db:
     image: timescale/timescaledb:latest-pg15
     ports:
